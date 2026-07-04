@@ -16,7 +16,7 @@ OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locall
          ▼               ▼               ▼               ▼
 ┌────────────────┐┌──────────────┐┌──────────────┐┌──────────────┐
 │     TUI.py     ││  whatsapp.py ││voice-detector││    Web UI    │
-│ (Textual TUI)  ││ (Neonize bot)││(openWakeWord)││(Vite React)  │
+│ (Textual TUI)  ││ (Neonize bot)││    (SOON)    ││(Vite React)  │
 └────────────────┘└──────────────┘└──────────────┘└──────────────┘
 ```
 

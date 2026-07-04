@@ -147,13 +147,21 @@ available_functions = {}
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            f.write(DEFAULT_CONFIG_TEXT)
-        print(f"'{CONFIG_FILE}' not found. Created a template file.")
-        print("Please configure 'config.yaml' and restart the script.")
-        print("\nPress ENTER to close...")
+        example_file = CONFIG_FILE + ".example"
+        if os.path.exists(example_file):
+            shutil.copy(example_file, CONFIG_FILE)
+            print(f"'{CONFIG_FILE}' was not found. Automatically copied from '{os.path.basename(example_file)}'.")
+        else:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                f.write(DEFAULT_CONFIG_TEXT)
+            print(f"'{CONFIG_FILE}' was not found. Generated a default template.")
+            
+        print("\n" + "="*60)
+        print(f" ACTION REQUIRED: Please open and edit '{os.path.basename(CONFIG_FILE)}' now.")
+        print(" Set your LATITUDE, LONGITUDE, and DEFAULT_MODEL (and your OpenAI API key if needed).")
+        print("="*60)
+        print("\nPress ENTER when you are done editing to continue...")
         input()
-        sys.exit(0)
 
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:

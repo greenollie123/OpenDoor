@@ -51,3 +51,7 @@ sub-programs/web-ui/.eslintcache
 # Development logs & old-code backups
 *.log
 old-code/
+
+# TEMP
+sub-programs\voice
+OLDREADME.md

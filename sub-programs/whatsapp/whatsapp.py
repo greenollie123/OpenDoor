@@ -75,14 +75,22 @@ def get_agent_ai_name(agent_name: str) -> str:
 def load_config():
     global VALID_CONFIG
     if not os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            f.write(DEFAULT_CONFIG_TEXT)
-        print(f"'{CONFIG_FILE}' not found. Created a template file.")
-        print("Please configure 'whatsapp_config.yaml' and restart the script.")
-        print("\nPress ENTER to close...")
-        input()  
-        VALID_CONFIG = False
-        return None
+        import shutil
+        example_file = CONFIG_FILE + ".example"
+        if os.path.exists(example_file):
+            shutil.copy(example_file, CONFIG_FILE)
+            print(f"'{CONFIG_FILE}' was not found. Automatically copied from '{os.path.basename(example_file)}'.")
+        else:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                f.write(DEFAULT_CONFIG_TEXT)
+            print(f"'{CONFIG_FILE}' was not found. Generated a default template.")
+            
+        print("\n" + "="*60)
+        print(f" ACTION REQUIRED: Please open and edit '{os.path.basename(CONFIG_FILE)}' now.")
+        print(" Add your authorized WhatsApp IDs/phone numbers to the allowlist.")
+        print("="*60)
+        print("\nPress ENTER when you are done editing to continue...")
+        input()
 
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:

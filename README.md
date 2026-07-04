@@ -48,8 +48,6 @@ OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locall
 └── sub-programs/
     ├── TUI/                   # Textual Terminal UI
     │   └── TUI.py
-    ├── voice/                 # Voice wake-word and TTS modules
-    │   └── voice-detector.py
     ├── whatsapp/              # WhatsApp Neonize bridge
     │   └── whatsapp.py
     └── web-ui/                # Vite React dashboard
@@ -66,15 +64,16 @@ OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locall
 - **OpenAI API Key** (set as environment variable `OPENAI_API_KEY`)
 - **System Audio Drivers**: 
   - *Windows*: Ensure you have your microphone and speaker devices enabled.
-  - *Linux/macOS*: Install `portaudio` before installing Python dependencies.
+  - *Linux/macOS* (UNTESTED): Install `portaudio` before installing Python dependencies.
     - Debian/Ubuntu: `sudo apt-get install portaudio19-dev`
     - macOS (Homebrew): `brew install portaudio`
 
-### 2. Python Dependencies Setup
+### 2. Dependency Setup
 
-In your project root, create a virtual environment and install the dependencies:
+In your project root, install the dependencies for Python and the Web UI:
 
 ```bash
+# Python Virtual Environment & Requirements
 python -m venv venv
 # Windows:
 venv\Scripts\activate
@@ -82,50 +81,12 @@ venv\Scripts\activate
 source venv/bin/activate
 
 pip install -r requirements.txt
-```
 
-### 3. Web UI Setup
-
-Navigate to the Web UI folder and install npm packages:
-
-```bash
+# Web UI Packages
 cd sub-programs/web-ui
 npm install
 cd ../..
 ```
-
-### 4. Configuration Setup
-
-Copy the example configurations to their active filenames:
-
-1. **Core Settings**:
-   Copy `config.yaml.example` in the root to `config.yaml`.
-   Edit `config.yaml` to specify your latitude/longitude (for weather forecasts) and fallback model:
-   ```yaml
-   LATITUDE: 51.5074
-   LONGITUDE: -0.1278
-   DEFAULT_MODEL: "gpt-4o"
-   ```
-
-2. **WhatsApp Gateway Settings**:
-   Copy `sub-programs/whatsapp/whatsapp_config.yaml.example` to `sub-programs/whatsapp/whatsapp_config.yaml`.
-   Add your authorized WhatsApp IDs/phone numbers to the allowlist.
-
----
-
-## 📦 Large Assets and Model Setup
-
-To keep the git repository lightweight, compiled binaries and deep learning weights are **not** checked into version control. You must download them manually prior to running:
-
-### 1. Piper (Text-to-Speech)
-If you wish to use local, offline voice synthesis instead of OpenAI TTS:
-1. Download the Piper executable (`piper.exe`) for your platform and place it under `sub-programs/voice/piper/`.
-2. Download a Piper voice ONNX model (e.g., `jarvis-high.onnx` and its config `jarvis-high.onnx.json`) and place them in the same folder.
-3. Configure `TTS_ENGINE = "piper"` inside `sub-programs/voice/voice-detector.py`.
-
-### 2. Wake Word Model (openWakeWord)
-1. By default, `voice-detector.py` uses the built-in `"hey_jarvis"` model.
-2. If you train/download a custom model (e.g., `genie.onnx`), place it in `sub-programs/voice/wakeword/` and update `WAKEWORD_PATH` inside the script.
 
 ---
 
@@ -137,10 +98,9 @@ Simply activate your virtual environment and run the main coordinator:
 python main.py
 ```
 
-This single command will:
-1. Boot up the coordinate Flask webhook server on port `5050`.
-2. Generate any missing database files/directories (`master/` directory is created on demand).
-3. Connect the MCP Client to `mcp_server.py`.
-4. Launch the **TUI**, **Voice Detector**, **WhatsApp Gateway**, and **Web UI** in their own console windows automatically.
+### ⚙️ Automatic Configuration Bootstrap
+You **do not** need to copy configuration files manually. 
+* On first startup, `main.py` will automatically detect if `config.yaml` is missing, copy it from `config.yaml.example`, and pause execution.
+* Simply edit your `config.yaml` in your editor, save it, and press **ENTER** in your terminal window to resume boot.
+* The same automatic copy and pause-to-edit flow happens for `whatsapp_config.yaml` when the WhatsApp subprogram launches.
 
-To shut down the entire system, press `Ctrl+C` in the main terminal launcher window.

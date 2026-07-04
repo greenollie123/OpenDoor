@@ -35,7 +35,7 @@ export const fetchUpdates = async (since, agentName) => {
   }
 };
 
-export const sendMessage = async (text, agentName) => {
+export const sendMessage = async (text, agentName, mediaPaths = []) => {
   try {
     const response = await fetch(`${BASE_URL}/message`, {
       method: 'POST',
@@ -46,6 +46,7 @@ export const sendMessage = async (text, agentName) => {
         channel: 'Web',
         text: text,
         agent: agentName,
+        media_paths: mediaPaths,
       }),
     });
     if (!response.ok) throw new Error('Failed to send message');
@@ -53,6 +54,24 @@ export const sendMessage = async (text, agentName) => {
   } catch (error) {
     console.error('API Error (sendMessage):', error);
     return false;
+  }
+};
+
+export const uploadFile = async (file, agentName) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('agent', agentName);
+    
+    const response = await fetch(`${BASE_URL}/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) throw new Error('Failed to upload file');
+    return await response.json();
+  } catch (error) {
+    console.error('API Error (uploadFile):', error);
+    return null;
   }
 };
 

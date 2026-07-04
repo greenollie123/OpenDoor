@@ -322,7 +322,7 @@ if VALID_CONFIG and config is not None:
             try:
                 image_bytes = client.download_any(parent_msg)
                 # Media goes to the agent's folder
-                media_dir = os.path.join(MASTER_DIR, "working", "agents", routed_agent, "whatsapp_media")
+                media_dir = os.path.join(MASTER_DIR, "working", "agents", routed_agent, "uploaded_media")
                 os.makedirs(media_dir, exist_ok=True)
                 filename = f"img_{int(time.time())}.jpg"
                 img_path = os.path.join(media_dir, filename)
@@ -452,9 +452,33 @@ if VALID_CONFIG and config is not None:
                             agent_ai_name = get_agent_ai_name(routed_agent)
                             prefix_template = str(config.get("REPLY_PREFIX", "\n{AI_NAME}:\n\n"))
                             prefix = prefix_template.replace("{AI_NAME}", agent_ai_name)
-                            full_reply = f"{prefix}{ai_reply}"
+                            
+                            # Extract files to send
+                            files_to_send = re.findall(r'\[SEND_FILE:\s*(.+?)\]', ai_reply)
+                            # Remove the tags from the text
+                            ai_reply_clean = re.sub(r'\[SEND_FILE:\s*(.+?)\]', '', ai_reply).strip()
+
+                            full_reply = f"{prefix}{ai_reply_clean}"
                             full_reply = re.sub(r'\*+', '*', full_reply)
-                            client.send_message(resolved_jid, full_reply)
+                            
+                            if ai_reply_clean:
+                                client.send_message(resolved_jid, full_reply)
+                                
+                            import mimetypes
+                            for fpath in files_to_send:
+                                if os.path.exists(fpath):
+                                    print(f" -> [Sending File] {fpath}")
+                                    try:
+                                        filename = os.path.basename(fpath)
+                                        mime_type, _ = mimetypes.guess_type(fpath)
+                                        if not mime_type:
+                                            mime_type = "application/octet-stream"
+                                            
+                                        client.send_document(resolved_jid, fpath, filename=filename, mimetype=mime_type)
+                                    except Exception as e:
+                                        print(f" -> [Error] Failed to send file {fpath}: {e}")
+                                else:
+                                    print(f" -> [Error] File to send not found: {fpath}")
                     else:
                         print(" -> [Error] JID resolution initialization pending.")
             else:

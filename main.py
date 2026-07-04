@@ -10,7 +10,8 @@ import subprocess
 import threading
 import logging
 import yaml
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
+from werkzeug.utils import secure_filename
 from pathlib import Path
 import shutil
 import requests
@@ -57,18 +58,21 @@ def load_session_into_updates(agent_name):
             role = msg.get("role")
             if role == "user":
                 content = msg.get("content", "")
-                channel = "External"
+                has_image = False
                 if isinstance(content, list):
                     text_part = next((item["text"] for item in content if isinstance(item, dict) and item.get("type") == "text"), "")
                     has_image = any(isinstance(item, dict) and item.get("type") == "image_url" for item in content)
-                    if has_image:
-                        content = f"🖼️ [Image Uploaded] {text_part}"
-                    else:
-                        content = text_part
+                    content = text_part
+                
+                channel = "External"
                 if isinstance(content, str) and content.startswith("[") and " Channel]: " in content:
                     parts = content.split(" Channel]: ", 1)
                     channel = parts[0][1:]
                     content = parts[1]
+                
+                if has_image and channel != "Web":
+                    content = f"🖼️ [Image Uploaded] {content}"
+                
                 ui_updates.append({
                     "id": len(ui_updates),
                     "type": "user",
@@ -80,6 +84,17 @@ def load_session_into_updates(agent_name):
                 content = msg.get("content", "")
                 channel = msg.get("channel", "External")
                 if content:
+                    import re
+                    import os
+                    if channel == "Web":
+                        def replace_file_tag(m):
+                            fpath = m.group(1).replace("\\", "/")
+                            name = os.path.basename(fpath)
+                            import urllib.parse
+                            url_path = urllib.parse.quote(fpath)
+                            return f"📎 [{name}](/api/download?path={url_path})"
+                        content = re.sub(r'\[SEND_FILE:\s*(.+?)\]', replace_file_tag, content)
+                        
                     ui_updates.append({
                         "id": len(ui_updates),
                         "type": "agent",
@@ -176,6 +191,99 @@ def load_config():
         sys.exit(0)
 
     return loaded_config
+
+
+@webhook_app.route('/api/upload', methods=['POST'])
+def handle_upload():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    agent_name = request.form.get('agent', 'Terry')
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+        
+    filename = secure_filename(file.filename)
+    if not filename:
+        import time
+        filename = f"file_{int(time.time())}"
+        
+    ext = os.path.splitext(filename)[1].lower()
+    is_image = ext in ['.png', '.jpg', '.jpeg', '.webp']
+    
+    if is_image:
+        dest_dir = os.path.join(AI_WORKSPACE_DIR, "agents", agent_name, "uploaded_media")
+    else:
+        dest_dir = os.path.join(AI_WORKSPACE_DIR, "agents", agent_name)
+        
+    os.makedirs(dest_dir, exist_ok=True)
+    
+    name, extension = os.path.splitext(filename)
+    counter = 1
+    unique_filename = filename
+    while os.path.exists(os.path.join(dest_dir, unique_filename)):
+        unique_filename = f"{name}_{counter}{extension}"
+        counter += 1
+        
+    filepath = os.path.join(dest_dir, unique_filename)
+    file.save(filepath)
+    
+    if is_image:
+        relative_path = f"uploaded_media/{unique_filename}"
+        web_url = f"/api/files/{agent_name}/{relative_path}"
+        return jsonify({
+            "status": "success",
+            "type": "image",
+            "filename": unique_filename,
+            "url": web_url,
+            "absolute_path": filepath
+        })
+    else:
+        relative_path = unique_filename
+        web_url = f"/api/files/{agent_name}/{relative_path}"
+        return jsonify({
+            "status": "success",
+            "type": "document",
+            "filename": unique_filename,
+            "url": web_url,
+            "absolute_path": filepath,
+            "relative_path": f"agents/{agent_name}/{unique_filename}"
+        })
+
+
+@webhook_app.route('/api/files/<agent_name>/<path:filepath>', methods=['GET'])
+def get_agent_file(agent_name, filepath):
+    agent_dir = os.path.abspath(os.path.join(AI_WORKSPACE_DIR, "agents", agent_name))
+    target_path = os.path.abspath(os.path.join(agent_dir, filepath))
+    
+    if not target_path.startswith(agent_dir):
+        return jsonify({"error": "Access denied"}), 403
+        
+    if not os.path.exists(target_path):
+        return jsonify({"error": "File not found"}), 404
+        
+    dir_name = os.path.dirname(target_path)
+    base_name = os.path.basename(target_path)
+    return send_from_directory(dir_name, base_name)
+
+
+@webhook_app.route('/api/download', methods=['GET'])
+def download_file():
+    target_path = request.args.get('path')
+    if not target_path:
+        return jsonify({"error": "Missing path parameter"}), 400
+        
+    target_path = os.path.abspath(target_path)
+    workspace = os.path.abspath(AI_WORKSPACE_DIR)
+    
+    if not target_path.startswith(workspace):
+        return jsonify({"error": "Access denied"}), 403
+        
+    if not os.path.exists(target_path):
+        return jsonify({"error": "File not found"}), 404
+        
+    dir_name = os.path.dirname(target_path)
+    base_name = os.path.basename(target_path)
+    return send_from_directory(dir_name, base_name, as_attachment=True)
 
 
 @webhook_app.route('/api/message', methods=['POST'])
@@ -440,7 +548,7 @@ def call_mcp_tool(name: str, arguments: dict, agent_name: str = "Terry"):
         if name in ["add_memory", "remove_memory"]:
             arguments["agent_name"] = agent_name
         future = asyncio.run_coroutine_threadsafe(mcp_session.call_tool(name, arguments), mcp_loop)
-        result = future.result(timeout=30)
+        result = future.result(timeout=190)
         text_parts = []
         for item in result.content:
             if getattr(item, "type", None) == "text":
@@ -451,7 +559,8 @@ def call_mcp_tool(name: str, arguments: dict, agent_name: str = "Terry"):
                 text_parts.append(str(item))
         return "\n".join(text_parts)
     except Exception as e:
-        return f"Error executing tool {name} via MCP: {str(e)}"
+        error_msg = str(e) if str(e) else type(e).__name__
+        return f"Error executing tool {name} via MCP: {error_msg}"
 
 
 def get_embedding(text: str) -> list:
@@ -646,8 +755,8 @@ def task_failed(reason_for_failure: str) -> str:
     return f"STATUS_FAILED: {reason_for_failure}"
 
 
-def delegate_to_subagent(task_description: str, agent_name: str = "Terry") -> str:
-    max_steps = 15
+def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reasoning_amount: str = "low") -> str:
+    max_steps = 100
     steps = 0
     exit_tools_schemas = [
         {
@@ -684,9 +793,35 @@ def delegate_to_subagent(task_description: str, agent_name: str = "Terry") -> st
     messages = [subagent_system, {"role": "user", "content": f"YOUR ASSIGNED TASK:\n{task_description}"}]
     while steps < max_steps:
         try:
-            agent_info = get_agent_info(agent_name)
-            agent_model = agent_info["AI_MODEL"]
-            response = client.chat.completions.create(model=agent_model, messages=messages, tools=subagent_tools, tool_choice="auto")
+            subagent_model = config.get("SUBAGENT_MODEL")
+            if not subagent_model:
+                agent_info = get_agent_info(agent_name)
+                subagent_model = agent_info.get("AI_MODEL", config.get("DEFAULT_MODEL", "gpt-5.4-nano"))
+
+            api_params = {
+                "model": subagent_model,
+                "messages": messages,
+                "tools": subagent_tools,
+                "tool_choice": "auto"
+            }
+
+            is_non_reasoning_model = (
+                "gpt-4" in subagent_model or
+                "gpt-3" in subagent_model or
+                "davinci" in subagent_model
+            )
+            if not is_non_reasoning_model and reasoning_amount:
+                api_params["reasoning_effort"] = reasoning_amount
+
+            try:
+                response = client.chat.completions.create(**api_params)
+            except Exception as api_err:
+                err_str = str(api_err).lower()
+                if "reasoning_effort" in err_str or "unsupported parameter" in err_str or "extra parameters" in err_str or "unexpected keyword" in err_str:
+                    api_params.pop("reasoning_effort", None)
+                    response = client.chat.completions.create(**api_params)
+                else:
+                    raise api_err
         except Exception as e:
             return f"Subagent execution broken due to API error: {str(e)}"
 
@@ -751,6 +886,11 @@ def _build_tools():
                     "task_description": {
                         "type": "string",
                         "description": "The precise instructions, constraints, file directories, and clear definition of success for the subagent's task."
+                    },
+                    "reasoning_amount": {
+                        "type": "string",
+                        "description": "The reasoning level/effort to pass to reasoning-capable models (e.g. 'low', 'medium', 'high'). Defaults to 'low' if not specified.",
+                        "enum": ["low", "medium", "high"]
                     }
                 },
                 "required": ["task_description"]
@@ -792,6 +932,11 @@ def get_disk_tools():
 def update_and_get_agent_tools(agent_name):
     global tools
     
+    # If tools list is empty or only has the local delegate_to_subagent,
+    # attempt to rebuild/re-fetch them from the MCP server to handle slow startups.
+    if len(tools) <= 1:
+        _build_tools()
+        
     agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
     tools_yaml_path = os.path.join(agent_files_dir, "tools.yaml")
     
@@ -869,7 +1014,7 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
     if media_paths is None:
         media_paths = []
     ui_text = clean_prompt_text
-    if media_paths:
+    if media_paths and context_channel != "Web":
         ui_text = f"🖼️ [Image Uploaded] {clean_prompt_text}"
     add_ui_update("user", context_channel, ui_text, agent_name)
 
@@ -997,7 +1142,17 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
                 chat_history.append({"role": "assistant", "content": final_text, "channel": context_channel})
                 save_chat_history(agent_name, chat_history)
             if final_text:
-                add_ui_update("agent", context_channel, final_text, agent_name)
+                import re
+                ui_text = final_text
+                if context_channel == "Web":
+                    def replace_file_tag(m):
+                        fpath = m.group(1).replace("\\", "/")
+                        name = os.path.basename(fpath)
+                        import urllib.parse
+                        url_path = urllib.parse.quote(fpath)
+                        return f"📎 [{name}](/api/download?path={url_path})"
+                    ui_text = re.sub(r'\[SEND_FILE:\s*(.+?)\]', replace_file_tag, ui_text)
+                add_ui_update("agent", context_channel, ui_text, agent_name)
             return final_text
 
         tool_calls_list = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in response_message.tool_calls]

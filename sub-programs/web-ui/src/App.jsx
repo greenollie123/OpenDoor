@@ -207,7 +207,7 @@ function App() {
   };
 
   // Handle sending a message
-  const handleSendMessage = async (text) => {
+  const handleSendMessage = async (text, mediaPaths = []) => {
     const tempId = Date.now();
     
     // Optimistic UI update: append to the current agent's history in the cache
@@ -228,7 +228,7 @@ function App() {
       };
     });
     
-    const success = await sendMessage(text, currentAgent);
+    const success = await sendMessage(text, currentAgent, mediaPaths);
     if (!success) {
       // Remove optimistic message and add system error
       setHistories(prev => {

@@ -99,6 +99,8 @@ Simply activate your virtual environment and run the main coordinator:
 python main.py
 ```
 
+This will automatically create a `Main` agent.
+
 ### ⚙️ Automatic Configuration Bootstrap
 You **do not** need to copy configuration files manually. 
 * On first startup, `main.py` will automatically detect if `config.yaml` is missing, copy it from `config.yaml.example`, and pause execution.

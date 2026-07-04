@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import ToolsModal from './ToolsModal';
+import SettingsModal from './SettingsModal';
+import CreateAgentModal from './CreateAgentModal';
+import { createAgent } from '../api';
 
 const Sidebar = ({ agents, currentAgent, onSelectAgent, agentDetails }) => {
   const [hoveredAgent, setHoveredAgent] = useState(null);
-  const [managingToolsFor, setManagingToolsFor] = useState(null);
+  const [managingSettingsFor, setManagingSettingsFor] = useState(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   return (
     <div style={{
@@ -13,7 +16,7 @@ const Sidebar = ({ agents, currentAgent, onSelectAgent, agentDetails }) => {
       borderRight: '1px solid var(--glass-border)',
       display: 'flex',
       flexDirection: 'column',
-      padding: '20px 0'
+      padding: '20px 0 0 0'
     }}>
       <div style={{ padding: '0 20px', marginBottom: '20px' }}>
         <h2 style={{ 
@@ -86,7 +89,7 @@ const Sidebar = ({ agents, currentAgent, onSelectAgent, agentDetails }) => {
                 <div 
                   onClick={(e) => {
                     e.stopPropagation();
-                    setManagingToolsFor(agent);
+                    setManagingSettingsFor(agent);
                   }}
                   style={{
                     width: '24px',
@@ -111,7 +114,7 @@ const Sidebar = ({ agents, currentAgent, onSelectAgent, agentDetails }) => {
                     e.currentTarget.style.color = 'var(--text-muted)';
                     e.currentTarget.style.backgroundColor = 'transparent';
                   }}
-                  title="Manage Tools"
+                  title="Settings"
                 >
                   ⚙️
                 </div>
@@ -121,10 +124,64 @@ const Sidebar = ({ agents, currentAgent, onSelectAgent, agentDetails }) => {
         )}
       </div>
 
-      {managingToolsFor && (
-        <ToolsModal 
-          agentName={managingToolsFor} 
-          onClose={() => setManagingToolsFor(null)} 
+      <div style={{ 
+        height: '94px', 
+        padding: '0 20px', 
+        borderTop: '1px solid var(--glass-border)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          style={{
+            width: '100%',
+            height: '46px',
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: '6px',
+            color: 'var(--text-main)',
+            cursor: 'pointer',
+            fontWeight: '600',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover)';
+            e.currentTarget.style.borderColor = 'var(--accent-primary)';
+            e.currentTarget.style.color = 'var(--accent-primary)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--bg-surface)';
+            e.currentTarget.style.borderColor = 'var(--glass-border)';
+            e.currentTarget.style.color = 'var(--text-main)';
+          }}
+        >
+          + Create Agent
+        </button>
+      </div>
+
+      {managingSettingsFor && (
+        <SettingsModal 
+          agentName={managingSettingsFor} 
+          initialDisplayName={agentDetails && agentDetails[managingSettingsFor] ? agentDetails[managingSettingsFor].AI_NAME : ''}
+          onClose={() => setManagingSettingsFor(null)} 
+          onSettingsUpdated={(agent, settings) => {
+            alert("Settings updated! Please refresh the page to see the changes.");
+          }}
+        />
+      )}
+
+      {showCreateModal && (
+        <CreateAgentModal 
+          onClose={() => setShowCreateModal(false)}
+          onCreate={async (name, displayName) => {
+            await createAgent(name, displayName);
+            alert("Agent created! Please manually refresh the page to see it in the list.");
+            setShowCreateModal(false);
+          }}
         />
       )}
     </div>

@@ -86,3 +86,43 @@ export const updateAgentTools = async (agentName, disabledTools) => {
     return false;
   }
 };
+
+export const createAgent = async (agentName, agentDisplayName) => {
+  try {
+    const response = await fetch(`${BASE_URL}/create_agent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent_name: agentName,
+        agent_display_name: agentDisplayName || agentName,
+      }),
+    });
+    if (!response.ok) throw new Error('Failed to create agent');
+    return await response.json();
+  } catch (error) {
+    console.error('API Error (createAgent):', error);
+    return false;
+  }
+};
+
+export const updateAgentSettings = async (agentName, settings) => {
+  try {
+    const response = await fetch(`${BASE_URL}/agent_settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent: agentName,
+        settings: settings,
+      }),
+    });
+    if (!response.ok) throw new Error('Failed to update agent settings');
+    return await response.json();
+  } catch (error) {
+    console.error('API Error (updateAgentSettings):', error);
+    return false;
+  }
+};

@@ -215,6 +215,73 @@ def get_agents():
             agent_details[item] = info
     return jsonify({"agents": agents, "agent_details": agent_details})
 
+@webhook_app.route('/api/create_agent', methods=['POST'])
+def create_agent():
+    data = request.json or {}
+    agent_name = data.get('agent_name')
+    agent_display_name = data.get('agent_display_name', agent_name)
+    if not agent_name:
+        return jsonify({"status": "error", "message": "agent_name is required"}), 400
+    
+    agent_working_dir = os.path.join(AI_WORKSPACE_DIR, "agents", agent_name)
+    agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
+    
+    os.makedirs(agent_working_dir, exist_ok=True)
+    os.makedirs(agent_files_dir, exist_ok=True)
+    
+    config_file = os.path.join(agent_working_dir, "config.yaml")
+    agent_config = {
+        "AI_MODEL": config.get("DEFAULT_MODEL", "gpt-5.4-nano"),
+        "AI_NAME": agent_display_name,
+    }
+    with open(config_file, "w", encoding="utf-8") as f:
+        yaml.safe_dump(agent_config, f)
+        
+    os.makedirs(os.path.join(agent_working_dir, "archived-sessions"), exist_ok=True)
+    os.makedirs(os.path.join(agent_files_dir, "archived-sessions"), exist_ok=True)
+    
+    tools_yaml = os.path.join(agent_files_dir, "tools.yaml")
+    if not os.path.exists(tools_yaml):
+        with open(tools_yaml, "w", encoding="utf-8") as f:
+            yaml.safe_dump({"disabled_tools": []}, f)
+            
+    sys_file = os.path.join(agent_working_dir, "SYSTEM.md")
+    if not os.path.exists(sys_file):
+        with open(sys_file, "w", encoding="utf-8") as f:
+            f.write(default_system_prompt)
+    
+    return jsonify({"status": "success", "agent": agent_name})
+
+@webhook_app.route('/api/agent_settings', methods=['POST'])
+def update_agent_settings():
+    data = request.json or {}
+    agent_name = data.get('agent')
+    settings = data.get('settings', {})
+    
+    if not agent_name:
+        return jsonify({"status": "error", "message": "agent is required"}), 400
+        
+    agent_working_dir = os.path.join(AI_WORKSPACE_DIR, "agents", agent_name)
+    config_file = os.path.join(agent_working_dir, "config.yaml")
+    
+    current_config = {}
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                loaded = yaml.safe_load(f)
+                if loaded:
+                    current_config = loaded
+        except Exception:
+            pass
+            
+    current_config.update(settings)
+    
+    os.makedirs(agent_working_dir, exist_ok=True)
+    with open(config_file, "w", encoding="utf-8") as f:
+        yaml.safe_dump(current_config, f)
+        
+    return jsonify({"status": "success"})
+
 
 @webhook_app.route('/api/load_agent', methods=['GET'])
 def load_agent():

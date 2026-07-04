@@ -1,5 +1,5 @@
 @mcp.tool()
-def read_archived_session_tutorial(agent_name: str = "Main") -> str:
+def read_archived_session_tutorial(agent_name: str = "Terry") -> str:
     """Shows the exact multi-step instructions for reading an archived session.
     
     Args:
@@ -13,7 +13,7 @@ def read_archived_session_tutorial(agent_name: str = "Main") -> str:
     )
 
 @mcp.tool()
-def read_create_tool_tutorial(agent_name: str = "Main") -> str:
+def read_create_tool_tutorial(agent_name: str = "Terry") -> str:
     """Shows the exact multi-step instructions for creating a new tool.
     
     Args:

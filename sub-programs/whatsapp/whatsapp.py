@@ -93,7 +93,7 @@ def load_config():
         loaded_config["SELF_CHAT_AGENT"] = "Jarvis"
         modified = True
     if "DEFAULT_AGENT" not in loaded_config:
-        loaded_config["DEFAULT_AGENT"] = "Main"
+        loaded_config["DEFAULT_AGENT"] = "Terry"
         modified = True
     if "CONTACT_AGENT_MAPPING" not in loaded_config:
         loaded_config["CONTACT_AGENT_MAPPING"] = {}
@@ -223,7 +223,7 @@ if VALID_CONFIG and config is not None:
         # Identify if this is a self-chat notebook window
         is_self_chat = (sender_id == chat_id) or (chat_target and not sender_jid)
 
-        default_agent = config.get("DEFAULT_AGENT", "Main")
+        default_agent = config.get("DEFAULT_AGENT", "Terry")
         routed_agent = default_agent
         if is_self_chat:
             routed_agent = config.get("SELF_CHAT_AGENT", default_agent)

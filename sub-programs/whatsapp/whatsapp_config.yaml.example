@@ -16,10 +16,10 @@ ADDITIONAL_YOU_CHAT_PERMISSIONS: true
 REPLY_PREFIX: "{AI_NAME}:\n\n"
 
 # SELF_CHAT_AGENT: The default agent handling self-chats (notebook window).
-SELF_CHAT_AGENT: "Main"
+SELF_CHAT_AGENT: "Terry"
 
 # DEFAULT_AGENT: The fallback agent handling incoming chats if not specifically mapped.
-DEFAULT_AGENT: "Main"
+DEFAULT_AGENT: "Terry"
 
 # CONTACT_AGENT_MAPPING: Maps specific contact phone numbers to agent names.
 # Example:

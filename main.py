@@ -33,7 +33,7 @@ ui_target = None
 ui_updates = []
 ui_updates_lock = threading.Lock()
 
-def add_ui_update(update_type, channel, content, agent="Main"):
+def add_ui_update(update_type, channel, content, agent="Terry"):
     with ui_updates_lock:
         ui_updates.append({
             "id": len(ui_updates),
@@ -186,7 +186,7 @@ def handle_webhook_message():
 
     channel = data.get("channel", "External")
     text = data.get("text", "")
-    agent = data.get("agent", "Main")
+    agent = data.get("agent", "Terry")
     media_paths = data.get("media_paths", [])
     reply_text = process_message(channel, text, agent, media_paths)
     return jsonify({"reply": reply_text})
@@ -195,7 +195,7 @@ def handle_webhook_message():
 @webhook_app.route('/api/updates', methods=['GET'])
 def get_updates():
     since = request.args.get('since', 0, type=int)
-    agent = request.args.get('agent', 'Main')
+    agent = request.args.get('agent', 'Terry')
     with ui_updates_lock:
         updates = [u for u in ui_updates[since:] if u.get("agent") == agent]
     return jsonify({"updates": updates})
@@ -285,13 +285,13 @@ def update_agent_settings():
 
 @webhook_app.route('/api/load_agent', methods=['GET'])
 def load_agent():
-    agent_name = request.args.get('agent', 'Main')
+    agent_name = request.args.get('agent', 'Terry')
     load_session_into_updates(agent_name)
     return jsonify({"status": "success", "agent": agent_name})
 
 @webhook_app.route('/api/agent_tools', methods=['GET'])
 def get_agent_tools():
-    agent_name = request.args.get('agent', 'Main')
+    agent_name = request.args.get('agent', 'Terry')
     agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
     tools_yaml_path = os.path.join(agent_files_dir, "tools.yaml")
     
@@ -320,7 +320,7 @@ def get_agent_tools():
 @webhook_app.route('/api/agent_tools', methods=['POST'])
 def update_agent_tools():
     data = request.json
-    agent_name = data.get('agent', 'Main')
+    agent_name = data.get('agent', 'Terry')
     disabled_tools = data.get('disabled_tools', [])
     
     agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
@@ -433,7 +433,7 @@ def get_mcp_tools():
         return []
 
 
-def call_mcp_tool(name: str, arguments: dict, agent_name: str = "Main"):
+def call_mcp_tool(name: str, arguments: dict, agent_name: str = "Terry"):
     if not mcp_session:
         raise RuntimeError("MCP server not connected.")
     try:
@@ -646,7 +646,7 @@ def task_failed(reason_for_failure: str) -> str:
     return f"STATUS_FAILED: {reason_for_failure}"
 
 
-def delegate_to_subagent(task_description: str, agent_name: str = "Main") -> str:
+def delegate_to_subagent(task_description: str, agent_name: str = "Terry") -> str:
     max_steps = 15
     steps = 0
     exit_tools_schemas = [
@@ -865,7 +865,7 @@ def encode_image_to_base64(image_path: str) -> str:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 
-def process_message(context_channel: str, clean_prompt_text: str, agent_name: str = "Main", media_paths: list = None) -> str:
+def process_message(context_channel: str, clean_prompt_text: str, agent_name: str = "Terry", media_paths: list = None) -> str:
     if media_paths is None:
         media_paths = []
     ui_text = clean_prompt_text
@@ -1074,10 +1074,10 @@ def init_backend():
     """
 
 
-    # 3. Check if agents directory is empty; if so, create a default 'Main' agent
+    # 3. Check if agents directory is empty; if so, create a default 'Terry' agent
     if not os.listdir(agents_working_dir):
-        print("No agents found. Creating default 'Main' agent...")
-        main_working_dir = os.path.join(agents_working_dir, "Main")
+        print("No agents found. Creating default 'Terry' agent...")
+        main_working_dir = os.path.join(agents_working_dir, "Terry")
         os.makedirs(main_working_dir, exist_ok=True)
     
     # 4. Initialize files and clean memories for all agents
@@ -1114,7 +1114,7 @@ def init_backend():
         if not os.path.exists(soul_file):
             with open(soul_file, "w", encoding="utf-8") as f:
                 f.write(f"""# SOUL (SOUL.md)
-You are a highly intelligent and capable AI assistant.""")
+You are {agent_dir}, a highly intelligent and capable AI assistant.""")
 
         mem_file = os.path.join(agent_working_path, "KEY_MEMORIES.json")
         if not os.path.exists(mem_file):

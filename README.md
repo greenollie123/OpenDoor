@@ -99,7 +99,7 @@ Simply activate your virtual environment and run the main coordinator:
 python main.py
 ```
 
-This will automatically create a `Main` agent.
+This will automatically create a `Terry` agent.
 
 ### ⚙️ Automatic Configuration Bootstrap
 You **do not** need to copy configuration files manually. 

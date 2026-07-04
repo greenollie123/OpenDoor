@@ -1,5 +1,5 @@
 @mcp.tool()
-def add_memory(text: str, expiry_date: str = None, agent_name: str = "Main") -> str:
+def add_memory(text: str, expiry_date: str = None, agent_name: str = "Terry") -> str:
     """Save an important fact, preference, or event to your core memory. Use this when the user mentions something you should remember for future sessions.
     
     Args:
@@ -37,7 +37,7 @@ def add_memory(text: str, expiry_date: str = None, agent_name: str = "Main") -> 
     return f"Successfully recorded new semantic memory with ID [{new_id}]."
 
 @mcp.tool()
-def remove_memory(memory_id: str, agent_name: str = "Main") -> str:
+def remove_memory(memory_id: str, agent_name: str = "Terry") -> str:
     """Delete a memory from your core memory using its ID. Use this if a fact is no longer true, or the user corrects you, or asks you to forget something.
     
     Args:

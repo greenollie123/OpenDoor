@@ -182,7 +182,7 @@ if VALID_CONFIG:
             super().__init__()
             self.messages = []
             self.chat_history = []
-            self.current_agent = "Main"
+            self.current_agent = "Terry"
             self.agents_list = []
             self.agent_details = {}
 
@@ -240,8 +240,8 @@ if VALID_CONFIG:
 
         def update_select_widget(self, agents: list) -> None:
             self.agents_list = agents
-            if "Main" in agents:
-                self.current_agent = "Main"
+            if "Terry" in agents:
+                self.current_agent = "Terry"
             elif agents:
                 self.current_agent = agents[0]
             

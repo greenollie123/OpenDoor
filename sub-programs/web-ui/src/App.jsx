@@ -7,7 +7,7 @@ import { fetchAgents, loadAgent, fetchUpdates, sendMessage } from './api';
 function App() {
   const [agents, setAgents] = useState([]);
   const [agentDetails, setAgentDetails] = useState({});
-  const [currentAgent, setCurrentAgent] = useState('Main');
+  const [currentAgent, setCurrentAgent] = useState('Terry');
   const [histories, setHistories] = useState({}); // { [agentName]: { messages: [], lastUpdateId: 0, hasLoaded: false } }
   const [status, setStatus] = useState('Connecting...');
 
@@ -41,8 +41,8 @@ function App() {
         setAgents(agentsList);
         setAgentDetails(details);
         
-        // Select the initial agent (default to Main or the first available)
-        const initialAgent = agentsList.includes('Main') ? 'Main' : agentsList[0];
+        // Select the initial agent (default to Terry or the first available)
+        const initialAgent = agentsList.includes('Terry') ? 'Terry' : agentsList[0];
         setCurrentAgent(initialAgent);
         
         setStatus(`Loading ${initialAgent}...`);

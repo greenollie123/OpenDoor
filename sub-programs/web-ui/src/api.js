@@ -145,3 +145,35 @@ export const updateAgentSettings = async (agentName, settings) => {
     return false;
   }
 };
+
+export const fetchAgentSkills = async (agentName) => {
+  try {
+    const response = await fetch(`${BASE_URL}/agent_skills?agent=${encodeURIComponent(agentName)}`);
+    if (!response.ok) throw new Error('Failed to fetch skills');
+    return await response.json();
+  } catch (error) {
+    console.error('API Error (fetchAgentSkills):', error);
+    return { all_skills: [], disabled_skills: [] };
+  }
+};
+
+export const updateAgentSkills = async (agentName, disabledSkills) => {
+  try {
+    const response = await fetch(`${BASE_URL}/agent_skills`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent: agentName,
+        disabled_skills: disabledSkills,
+      }),
+    });
+    if (!response.ok) throw new Error('Failed to update skills');
+    return true;
+  } catch (error) {
+    console.error('API Error (updateAgentSkills):', error);
+    return false;
+  }
+};
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchAgentTools, updateAgentTools, updateAgentSettings } from '../api';
+import { fetchAgentTools, updateAgentTools, updateAgentSettings, fetchAgentSkills, updateAgentSkills } from '../api';
 
 const SettingsModal = ({ agentName, initialDisplayName, onClose, onSettingsUpdated }) => {
   const [activeTab, setActiveTab] = useState('General');
@@ -9,6 +9,11 @@ const SettingsModal = ({ agentName, initialDisplayName, onClose, onSettingsUpdat
   const [disabledTools, setDisabledTools] = useState([]);
   const [needsRestart, setNeedsRestart] = useState([]);
   const [loadingTools, setLoadingTools] = useState(true);
+
+  // Skills state
+  const [allSkills, setAllSkills] = useState([]);
+  const [disabledSkills, setDisabledSkills] = useState([]);
+  const [loadingSkills, setLoadingSkills] = useState(true);
   
   // General state
   const [displayName, setDisplayName] = useState(initialDisplayName || agentName);
@@ -19,6 +24,9 @@ const SettingsModal = ({ agentName, initialDisplayName, onClose, onSettingsUpdat
   useEffect(() => {
     if (activeTab === 'Tools' && allTools.length === 0) {
       loadTools();
+    }
+    if (activeTab === 'Skills' && allSkills.length === 0) {
+      loadSkills();
     }
   }, [activeTab]);
 
@@ -31,10 +39,25 @@ const SettingsModal = ({ agentName, initialDisplayName, onClose, onSettingsUpdat
     setLoadingTools(false);
   };
 
+  const loadSkills = async () => {
+    setLoadingSkills(true);
+    const data = await fetchAgentSkills(agentName);
+    setAllSkills(data.all_skills || []);
+    setDisabledSkills(data.disabled_skills || []);
+    setLoadingSkills(false);
+  };
+
   const handleToggleTool = (toolName) => {
     setDisabledTools(prev => {
       if (prev.includes(toolName)) return prev.filter(t => t !== toolName);
       return [...prev, toolName];
+    });
+  };
+
+  const handleToggleSkill = (skillName) => {
+    setDisabledSkills(prev => {
+      if (prev.includes(skillName)) return prev.filter(s => s !== skillName);
+      return [...prev, skillName];
     });
   };
 
@@ -44,6 +67,11 @@ const SettingsModal = ({ agentName, initialDisplayName, onClose, onSettingsUpdat
     // Save Tools
     if (activeTab === 'Tools' || allTools.length > 0) {
       await updateAgentTools(agentName, disabledTools);
+    }
+
+    // Save Skills
+    if (activeTab === 'Skills' || allSkills.length > 0) {
+      await updateAgentSkills(agentName, disabledSkills);
     }
     
     // Save General
@@ -121,7 +149,7 @@ const SettingsModal = ({ agentName, initialDisplayName, onClose, onSettingsUpdat
             flexDirection: 'column',
             padding: '10px 0'
           }}>
-            {['General', 'Tools'].map(tab => (
+            {['General', 'Tools', 'Skills'].map(tab => (
               <div 
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -229,6 +257,69 @@ const SettingsModal = ({ agentName, initialDisplayName, onClose, onSettingsUpdat
                                     Needs restart to activate
                                   </div>
                                 )}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '0.85rem', color: isDisabled ? 'var(--text-muted)' : 'var(--accent-success)' }}>
+                              {isDisabled ? 'Disabled' : 'Enabled'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'Skills' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
+                <h3 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.1rem' }}>Manage Skills</h3>
+                
+                <div style={{ flex: 1, overflowY: 'auto', paddingRight: '10px' }}>
+                  {loadingSkills ? (
+                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>Loading skills...</div>
+                  ) : allSkills.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No skills available.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {allSkills.map(skill => {
+                        const isDisabled = disabledSkills.includes(skill);
+                        return (
+                          <div key={skill} style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '12px 16px',
+                            backgroundColor: 'var(--bg-surface)',
+                            borderRadius: '8px',
+                            border: '1px solid var(--glass-border)',
+                            transition: 'border-color 0.2s',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => handleToggleSkill(skill)}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <div style={{
+                                width: '40px',
+                                height: '22px',
+                                backgroundColor: isDisabled ? 'var(--bg-main)' : 'var(--accent-success)',
+                                borderRadius: '12px',
+                                position: 'relative',
+                                transition: 'background-color 0.3s'
+                              }}>
+                                <div style={{
+                                  width: '18px',
+                                  height: '18px',
+                                  backgroundColor: '#fff',
+                                  borderRadius: '50%',
+                                  position: 'absolute',
+                                  top: '2px',
+                                  left: isDisabled ? '2px' : '20px',
+                                  transition: 'left 0.3s',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                                }} />
+                              </div>
+                              <div>
+                                <div style={{ color: 'var(--text-main)', fontWeight: '500' }}>{skill}</div>
                               </div>
                             </div>
                             <div style={{ fontSize: '0.85rem', color: isDisabled ? 'var(--text-muted)' : 'var(--accent-success)' }}>

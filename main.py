@@ -129,11 +129,6 @@ RUBBISH_BIN_DIR = os.path.join(FILE_DIR, "rubbish_bin")
 os.makedirs(RUBBISH_BIN_DIR, exist_ok=True)
 
 
-HISTORY_FILE = os.path.join(FILE_DIR, r"session_chat_history.json")
-if not os.path.exists(HISTORY_FILE):
-    with open(HISTORY_FILE, "w") as f:
-        json.dump([], f)
-
 SYSTEM_FILE = os.path.join(AI_WORKSPACE_DIR, r"SYSTEM.md")
 SOUL_FILE = os.path.join(AI_WORKSPACE_DIR, r"SOUL.md")
 KEY_MEMORIES_FILE = os.path.join(AI_WORKSPACE_DIR, r"KEY_MEMORIES.json") 
@@ -353,6 +348,12 @@ def create_agent():
         with open(tools_yaml, "w", encoding="utf-8") as f:
             yaml.safe_dump({"disabled_tools": []}, f)
             
+    skills_yaml = os.path.join(agent_files_dir, "skills.yaml")
+    if not os.path.exists(skills_yaml):
+        with open(skills_yaml, "w", encoding="utf-8") as f:
+            yaml.safe_dump({"disabled_skills": []}, f)
+    update_and_get_agent_skills(agent_name)
+            
     sys_file = os.path.join(agent_working_dir, "SYSTEM.md")
     if not os.path.exists(sys_file):
         with open(sys_file, "w", encoding="utf-8") as f:
@@ -439,6 +440,59 @@ def update_agent_tools():
         yaml.safe_dump({"disabled_tools": disabled_tools}, f)
         
     return jsonify({"status": "success"})
+
+
+@webhook_app.route('/api/agent_skills', methods=['GET'])
+def get_agent_skills():
+    agent_name = request.args.get('agent', 'Terry')
+    
+    skills_dir = os.path.join(AI_WORKSPACE_DIR, "skills")
+    disk_skills = []
+    if os.path.exists(skills_dir):
+        try:
+            for skill_name in sorted(os.listdir(skills_dir)):
+                skill_path = os.path.join(skills_dir, skill_name)
+                if os.path.isdir(skill_path):
+                    skill_file = os.path.join(skill_path, "SKILL.md")
+                    if os.path.exists(skill_file):
+                        disk_skills.append(skill_name)
+        except Exception:
+            pass
+            
+    agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
+    skills_yaml_path = os.path.join(agent_files_dir, "skills.yaml")
+    
+    disabled_skills = []
+    if os.path.exists(skills_yaml_path):
+        try:
+            with open(skills_yaml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+                disabled_skills = data.get("disabled_skills") or []
+        except Exception:
+            pass
+            
+    return jsonify({
+        "all_skills": disk_skills,
+        "disabled_skills": disabled_skills
+    })
+
+@webhook_app.route('/api/agent_skills', methods=['POST'])
+def update_agent_skills():
+    data = request.json
+    agent_name = data.get('agent', 'Terry')
+    disabled_skills = data.get('disabled_skills', [])
+    
+    agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
+    skills_yaml_path = os.path.join(agent_files_dir, "skills.yaml")
+    
+    os.makedirs(agent_files_dir, exist_ok=True)
+    with open(skills_yaml_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"disabled_skills": disabled_skills}, f)
+        
+    update_and_get_agent_skills(agent_name)
+        
+    return jsonify({"status": "success"})
+
 
 
 
@@ -694,6 +748,14 @@ def load_system_prompt(agent_name: str, user_query: str = "") -> str:
     tools_md_file = os.path.join(agent_files_dir, "TOOLS.md")
 
     loaded_prompts = []
+    
+    # Load workspace skills
+    try:
+        skills_prompts = update_and_get_agent_skills(agent_name)
+        if skills_prompts:
+            loaded_prompts.append("## AVAILABLE SKILLS\n\n" + "\n\n---\n\n".join(skills_prompts))
+    except Exception as e:
+        print(f"Error loading skills: {e}")
     
     if os.path.exists(tools_md_file):
         try:
@@ -987,6 +1049,93 @@ def update_and_get_agent_tools(agent_name):
     return agent_tool_schemas
 
 
+def update_and_get_agent_skills(agent_name: str) -> list:
+    skills_dir = os.path.join(AI_WORKSPACE_DIR, "skills")
+    disk_skills = []
+    if os.path.exists(skills_dir):
+        try:
+            for skill_name in sorted(os.listdir(skills_dir)):
+                skill_path = os.path.join(skills_dir, skill_name)
+                if os.path.isdir(skill_path):
+                    skill_file = os.path.join(skill_path, "SKILL.md")
+                    if os.path.exists(skill_file):
+                        disk_skills.append(skill_name)
+        except Exception:
+            pass
+
+    agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
+    skills_yaml_path = os.path.join(agent_files_dir, "skills.yaml")
+    
+    disabled_skills = []
+    if os.path.exists(skills_yaml_path):
+        try:
+            with open(skills_yaml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+                disabled_skills = data.get("disabled_skills") or []
+        except Exception:
+            pass
+            
+    os.makedirs(agent_files_dir, exist_ok=True)
+    with open(skills_yaml_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"disabled_skills": disabled_skills}, f)
+        
+    enabled_skills = []
+    disabled_skills_present = []
+    
+    for s in disk_skills:
+        if s in disabled_skills:
+            disabled_skills_present.append(s)
+        else:
+            enabled_skills.append(s)
+            
+    skills_md_path = os.path.join(agent_files_dir, "SKILLS.md")
+    with open(skills_md_path, "w", encoding="utf-8") as f:
+        f.write("### Skills Status\n\n")
+        f.write("**Enabled skills:**\n")
+        for s in enabled_skills:
+            f.write(f"- {s}\n")
+        if not enabled_skills:
+            f.write("- None\n")
+            
+        f.write("\n**Disabled skills:**\n")
+        for s in disabled_skills_present:
+            f.write(f"- {s}\n")
+        if not disabled_skills_present:
+            f.write("- None\n")
+            
+    loaded_skills_content = []
+    for s in enabled_skills:
+        skill_file = os.path.join(skills_dir, s, "SKILL.md")
+        try:
+            with open(skill_file, "r", encoding="utf-8") as sf:
+                content = sf.read().strip()
+            if content:
+                body = content
+                name = s
+                desc = ""
+                if content.startswith("---"):
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        try:
+                            frontmatter = yaml.safe_load(parts[1])
+                            if isinstance(frontmatter, dict):
+                                name = frontmatter.get("name", name)
+                                desc = frontmatter.get("description", "")
+                            body = parts[2].strip()
+                        except Exception:
+                            pass
+                
+                skill_block = f"### SKILL: {name}"
+                if desc:
+                    skill_block += f" - {desc}"
+                skill_block += f"\n{body}"
+                loaded_skills_content.append(skill_block)
+        except Exception:
+            pass
+            
+    return loaded_skills_content
+
+
 def get_agent_info(agent_name: str) -> dict:
     agent_working_dir = os.path.join(AI_WORKSPACE_DIR, "agents", agent_name)
     agent_config_file = os.path.join(agent_working_dir, "config.yaml")
@@ -1196,6 +1345,8 @@ def init_backend():
     os.makedirs(AI_WORKSPACE_DIR, exist_ok=True)
     os.makedirs(FILE_DIR, exist_ok=True)
     os.makedirs(RUBBISH_BIN_DIR, exist_ok=True)
+    os.makedirs(os.path.join(AI_WORKSPACE_DIR, "skills"), exist_ok=True)
+    os.makedirs(os.path.join(AI_WORKSPACE_DIR, "custom-tools"), exist_ok=True)
 
     # 1. Ensure agents directories exist
     agents_working_dir = os.path.join(AI_WORKSPACE_DIR, "agents")
@@ -1249,6 +1400,12 @@ def init_backend():
         if not os.path.exists(tools_yaml):
             with open(tools_yaml, "w", encoding="utf-8") as f:
                 yaml.safe_dump({"disabled_tools": []}, f)
+
+        skills_yaml = os.path.join(agent_files_path, "skills.yaml")
+        if not os.path.exists(skills_yaml):
+            with open(skills_yaml, "w", encoding="utf-8") as f:
+                yaml.safe_dump({"disabled_skills": []}, f)
+        update_and_get_agent_skills(agent_dir)
 
         # Initialize missing default files for any agent
         config_file = os.path.join(agent_working_path, "config.yaml")

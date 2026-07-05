@@ -63,11 +63,7 @@ The only files strictly required to use this are `main.py`, `mcp_server.py` and 
 - **Python 3.10 to 3.12**
 - **Node.js 18+** (for the Web UI)
 - **OpenAI API Key** (set as environment variable `OPENAI_API_KEY`)
-- **System Audio Drivers**: 
-  - *Windows*: Ensure you have your microphone and speaker devices enabled.
-  - *Linux/macOS* (UNTESTED): Install `portaudio` before installing Python dependencies.
-    - Debian/Ubuntu: `sudo apt-get install portaudio19-dev`
-    - macOS (Homebrew): `brew install portaudio`
+- **Operating system**: Tested with `Windows 10/11`. Unsure if this works with `linux`/`macos`.
 
 ### 2. Dependency Setup
 
@@ -93,7 +89,7 @@ cd ../..
 
 ## 🚀 Running the Assistant
 
-Simply activate your virtual environment and run the main coordinator:
+Simply activate your virtual environment and run the main script:
 
 ```bash
 python main.py

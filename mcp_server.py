@@ -26,7 +26,8 @@ except Exception:
 LATITUDE = float(config.get("LATITUDE", 0.0))
 LONGITUDE = float(config.get("LONGITUDE", 0.0))
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+api_key = config.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key) if api_key else None
 
 MASTER_DIR = os.path.join(ROOT_DIR, "master")
 AI_WORKSPACE_DIR = os.path.join(MASTER_DIR, "working")
@@ -37,6 +38,8 @@ KEY_MEMORIES_FILE = os.path.join(AI_WORKSPACE_DIR, "KEY_MEMORIES.json")
 mcp = FastMCP("Core Assistant Tools")
 
 def get_embedding(text: str) -> list:
+    if not client:
+        return []
     try:
         response = client.embeddings.create(
             model="text-embedding-3-small",

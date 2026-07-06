@@ -30,14 +30,15 @@ OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locall
 
 ## 📂 Project Structure
 
-The only files strictly required to use this are `main.py`, `mcp_server.py` and `config.yaml.example`.
+The only files strictly required to start this are `main.py`, `mcp_server.py` and `config.yaml.example`.
 
 ```text
 ├── main.py                    # Coordinator and main entrypoint
 ├── mcp_server.py              # MCP tool loading server
 ├── config.yaml.example        # Core configuration template
 ├── requirements.txt           # Python package dependencies
-├── LICENSE                    # MIT License
+├── LICENSE                    # License stuff
+├── master/working/skills/     # Useful pre-made skills
 ├── tools/                     # Core system tools (Weather, Memory, Files, etc.)
 │   ├── directory.py
 │   ├── file_management.py

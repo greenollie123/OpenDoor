@@ -492,6 +492,10 @@ def load_agent():
 
 @webhook_app.route('/api/agent_tools', methods=['GET'])
 def get_agent_tools():
+    global tools
+    if len(tools) <= 1:
+        _build_tools()
+        
     agent_name = request.args.get('agent', 'Terry')
     agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
     tools_yaml_path = os.path.join(agent_files_dir, "tools.yaml")
@@ -1497,7 +1501,8 @@ def init_backend():
     global config, client
 
     config = load_config()
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    api_key = config.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    client = OpenAI(api_key=api_key) if api_key else None
 
     os.makedirs(MASTER_DIR, exist_ok=True)
     os.makedirs(AI_WORKSPACE_DIR, exist_ok=True)
@@ -1630,7 +1635,7 @@ To create tools, read `custom-tools/CUSTOM_TOOLS_CREATION_TUTORIAL.md` first.
     # Start MCP client and wait for handshake
     start_mcp_client()
     import time
-    for _ in range(50):
+    for _ in range(100):
         if mcp_session:
             break
         time.sleep(0.1)

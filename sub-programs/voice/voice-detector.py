@@ -75,7 +75,7 @@ model_key = "hey_jarvis"
 # Load Whisper model ONCE at startup. Re-loading it on every transcription call
 # was the cause of the "abnormally long" STT delay.
 print("Loading Whisper model...")
-whisper_model = WhisperModel("small.en", compute_type="int8", device="cuda")
+whisper_model = WhisperModel("small.en", compute_type="int8", device="auto")
 print("Whisper model loaded.")
 
 # Single PyAudio instance

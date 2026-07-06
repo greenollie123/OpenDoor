@@ -109,7 +109,7 @@ if VALID_CONFIG and config is not None:
     # Audio Subsystem Initialization
     # -----------------------------------------------------------------
     print("\n[*] Initializing Whisper STT Engine...")
-    whisper_model = WhisperModel("small.en", compute_type="int8", device="cuda")
+    whisper_model = WhisperModel("small.en", compute_type="int8", device="auto")
     
     print("[*] Initializing OpenAI TTS Engine...")
     openai_client = OpenAI() 

@@ -49,7 +49,7 @@ OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locall
 - **Core Coordinator (`main.py`)**: Launches the Flask webhooks server on `http://127.0.0.1:5050` and acts as the central router for messages and UI updates across all channels.
 - **FastMCP Server (`mcp_server.py`)**: Dynamically loads tools (from `tools/` and `master/working/custom-tools/`) and connects them via the Model Context Protocol (MCP).
 - **Textual TUI (`sub-programs/TUI/TUI.py`)**: A modern terminal interface for text chatting with auto-completion and agent selection.
-- **Terminal Client (`sub-programs/terminal/terminal.py`)**: An interactive chat shell and command-line utility for chatting with agents directly from the command prompt.
+- **Terminal Client (`terminal/terminal.py`)**: An interactive chat shell and command-line utility for chatting with agents directly from the command prompt.
 - **WhatsApp Gateway (`sub-programs/whatsapp/whatsapp.py`)**: Leverages `neonize` to connect the AI as a chatbot responder to your WhatsApp number.
 - **Web UI (`sub-programs/web-ui/`)**: A sleek React dashboard built with Vite to manage agents, view chat logs, and toggle tools.
 
@@ -76,11 +76,13 @@ The only files strictly required to start this are `main.py`, `mcp_server.py` an
 │   ├── move_item.py
 │   ├── skills.py
 │   └── weather.py
+├── terminal/                  # Terminal Client & Shortcuts
+│   ├── terminal.py            # Terminal Client Core
+│   ├── opendoor               # Launcher script for Linux/macOS
+│   └── opendoor.bat           # Launcher script for Windows
 └── sub-programs/
     ├── TUI/                   # Textual Terminal UI
     │   └── TUI.py
-    ├── terminal/              # Terminal Client & Shortcuts
-    │   ├── terminal.py        # Terminal Client Core
     ├── whatsapp/              # WhatsApp Neonize bridge
     │   └── whatsapp.py
     └── web-ui/                # Vite React dashboard

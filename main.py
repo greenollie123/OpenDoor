@@ -818,7 +818,7 @@ def start_subprograms():
     voice_script = os.path.join(SUBPROGRAMS_DIR, "voice", "voice-detector.py")
     whatsapp_script = os.path.join(SUBPROGRAMS_DIR, "whatsapp", "whatsapp.py")
     tui_script = os.path.join(SUBPROGRAMS_DIR, "TUI", "TUI.py")
-    terminal_script = os.path.join(SUBPROGRAMS_DIR, "terminal", "terminal.py")
+    terminal_script = os.path.join(MAIN_DIR, "terminal", "terminal.py")
     web_ui_dir = os.path.join(SUBPROGRAMS_DIR, "web-ui")
 
     show_terminal = "--terminal" in sys.argv

@@ -1,10 +1,10 @@
 @echo off
-REM Get the directory of this batch file (sub-programs\terminal)
+REM Get the directory of this batch file (terminal)
 set "CURRENT_DIR=%~dp0"
 if "%CURRENT_DIR:~-1%"=="\" set "CURRENT_DIR=%CURRENT_DIR:~0,-1%"
 
-REM Get the root directory (two levels up)
-for %%i in ("%CURRENT_DIR%\..\..") do set "ROOT_DIR=%%~fi"
+REM Get the root directory (one level up)
+for %%i in ("%CURRENT_DIR%\..") do set "ROOT_DIR=%%~fi"
 
 set "PYTHON_EXE=python"
 if exist "%ROOT_DIR%\venv\Scripts\python.exe" (

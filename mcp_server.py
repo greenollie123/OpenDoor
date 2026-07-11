@@ -135,6 +135,10 @@ for search_dir in [CORE_TOOLS_DIR, CUSTOM_TOOLS_DIR]:
             if basename.startswith("__"):
                 continue
                 
+            if basename == "weather.py" and config.get("DISABLE_WEATHER", False):
+                print("Skipping weather.py because weather tool is disabled in config.")
+                continue
+                
             module_name = f"tools.{basename[:-3]}"
             spec = importlib.util.spec_from_file_location(module_name, filepath)
             if spec and spec.loader:

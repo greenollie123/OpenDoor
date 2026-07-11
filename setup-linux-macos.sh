@@ -27,7 +27,7 @@ echo "[2/4] Installing/upgrading requirements..."
 # 3. Make wrappers executable
 echo ""
 echo "[3/4] Granting executable permissions to launcher scripts..."
-chmod +x "$DIR/sub-programs/terminal/opendoor"
+chmod +x "$DIR/terminal/opendoor"
 echo "Done."
 
 # 4. Add to PATH in shell profiles
@@ -38,8 +38,8 @@ DETECTED_SHELLS=""
 
 # Check zsh
 if [ -f "$HOME/.zshrc" ]; then
-    if ! grep -q "$DIR/sub-programs/terminal" "$HOME/.zshrc"; then
-        echo "export PATH=\"\$PATH:$DIR/sub-programs/terminal\"" >> "$HOME/.zshrc"
+    if ! grep -q "$DIR/terminal" "$HOME/.zshrc"; then
+        echo "export PATH=\"\$PATH:$DIR/terminal\"" >> "$HOME/.zshrc"
         DETECTED_SHELLS="$DETECTED_SHELLS .zshrc"
         ADDED=1
     fi
@@ -47,8 +47,8 @@ fi
 
 # Check bash
 if [ -f "$HOME/.bashrc" ]; then
-    if ! grep -q "$DIR/sub-programs/terminal" "$HOME/.bashrc"; then
-        echo "export PATH=\"\$PATH:$DIR/sub-programs/terminal\"" >> "$HOME/.bashrc"
+    if ! grep -q "$DIR/terminal" "$HOME/.bashrc"; then
+        echo "export PATH=\"\$PATH:$DIR/terminal\"" >> "$HOME/.bashrc"
         DETECTED_SHELLS="$DETECTED_SHELLS .bashrc"
         ADDED=1
     fi
@@ -56,8 +56,8 @@ fi
 
 # Check profile
 if [ -f "$HOME/.profile" ]; then
-    if ! grep -q "$DIR/sub-programs/terminal" "$HOME/.profile"; then
-        echo "export PATH=\"\$PATH:$DIR/sub-programs/terminal\"" >> "$HOME/.profile"
+    if ! grep -q "$DIR/terminal" "$HOME/.profile"; then
+        echo "export PATH=\"\$PATH:$DIR/terminal\"" >> "$HOME/.profile"
         DETECTED_SHELLS="$DETECTED_SHELLS .profile"
         ADDED=1
     fi

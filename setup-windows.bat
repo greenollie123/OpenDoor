@@ -34,7 +34,7 @@ if errorlevel 1 (
 REM 3. Add to user PATH
 echo.
 echo [3/3] Setting up PATH environment variable...
-powershell -NoProfile -Command "$p = [System.Environment]::GetEnvironmentVariable('PATH', 'User'); if (-not $p.Split(';').Contains('%DIR%\sub-programs\terminal')) { [System.Environment]::SetEnvironmentVariable('PATH', $p + ';%DIR%\sub-programs\terminal', 'User'); Write-Host 'Added to PATH successfully!' -ForegroundColor Green } else { Write-Host 'Already in PATH.' -ForegroundColor Yellow }"
+powershell -NoProfile -Command "$p = [System.Environment]::GetEnvironmentVariable('PATH', 'User'); if (-not $p.Split(';').Contains('%DIR%\terminal')) { [System.Environment]::SetEnvironmentVariable('PATH', $p + ';%DIR%\terminal', 'User'); Write-Host 'Added to PATH successfully!' -ForegroundColor Green } else { Write-Host 'Already in PATH.' -ForegroundColor Yellow }"
 
 echo.
 echo OpenDoor setup complete! 

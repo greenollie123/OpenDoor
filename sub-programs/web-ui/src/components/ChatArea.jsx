@@ -7,7 +7,7 @@ marked.setOptions({
   gfm: true
 });
 
-const ChatArea = ({ history, agentDetails, onApprove, onDeny }) => {
+const ChatArea = ({ history, agentDetails, onApprove, onDeny, onToolClick }) => {
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -173,6 +173,44 @@ const ChatArea = ({ history, agentDetails, onApprove, onDeny }) => {
     }
 
     if (isSystem) {
+      if (msg.tool_call_id) {
+        return (
+          <div key={idx} style={{
+            display: 'flex',
+            justifyContent: 'center',
+            margin: '16px 0'
+          }}>
+            <div 
+              onClick={() => onToolClick && onToolClick(msg.tool_call_id)}
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--accent-primary)',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                border: '1px solid var(--glass-border)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--glass-border)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <span>⚙️</span>
+              <span style={{ fontWeight: '600' }}>{msg.content}</span>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div key={idx} style={{
           display: 'flex',

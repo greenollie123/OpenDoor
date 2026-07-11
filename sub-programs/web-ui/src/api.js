@@ -197,4 +197,24 @@ export const approveCommand = async (approvalId, action) => {
   }
 };
 
+export const fetchProcessViewerData = async () => {
+  try {
+    const response = await fetch(`${BASE_URL}/process_viewer`);
+    if (!response.ok) throw new Error('Failed to fetch process viewer data');
+    return await response.json();
+  } catch (error) {
+    console.error('API Error (fetchProcessViewerData):', error);
+    return { background_processes: [], tool_executions: [] };
+  }
+};
 
+export const fetchToolExecution = async (id) => {
+  try {
+    const response = await fetch(`${BASE_URL}/tool_execution/${id}`);
+    if (!response.ok) throw new Error('Failed to fetch tool execution data');
+    return await response.json();
+  } catch (error) {
+    console.error('API Error (fetchToolExecution):', error);
+    return null;
+  }
+};

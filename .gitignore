@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .pytest_cache/
+*__pycache__
 
 # Environments & OS files
 .env
@@ -22,7 +23,6 @@ sub-programs/whatsapp/whatsapp_config.yaml
 # Runtime workspace & transient data
 master/files/
 master/working/agents/
-master/working/custom-tools/
 master/working/skills/merge-spreadsheets/
 
 # Subprogram runtime DBs and audios
@@ -59,3 +59,7 @@ github-stuff.md
 # TEMP
 sub-programs/voice
 OLDREADME.md
+
+master/working/custom-tools/bedroom_light.py
+master/working/custom-tools/__pycache__
+master/working/custom-tools/data

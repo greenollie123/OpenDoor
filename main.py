@@ -38,6 +38,8 @@ pending_approvals = {}
 pending_approvals_lock = threading.Lock()
 active_tool_contexts = {}
 active_tool_contexts_lock = threading.Lock()
+tool_executions_log = {}
+tool_executions_lock = threading.Lock()
 request_context = threading.local()
 
 def add_ui_update(update_type, channel, content, agent="Terry", **kwargs):
@@ -717,6 +719,54 @@ def update_agent_skills():
         
     return jsonify({"status": "success"})
 
+@webhook_app.route('/api/process_viewer', methods=['GET'])
+def process_viewer():
+    bg_procs = []
+    for p in subprocesses:
+        try:
+            args = p.args
+            name = " ".join(args) if isinstance(args, list) else str(args)
+            
+            if "voice-detector.py" in name:
+                display_name = "Voice Detector"
+            elif "whatsapp.py" in name:
+                display_name = "WhatsApp Gateway"
+            elif "TUI.py" in name:
+                display_name = "TUI Interface"
+            elif "terminal.py" in name:
+                display_name = "Terminal Shell"
+            elif "npm" in name and "dev" in name:
+                display_name = "Web UI Server"
+            else:
+                display_name = name
+
+            status = "Running" if p.poll() is None else "Terminated"
+            bg_procs.append({"name": display_name, "status": status, "pid": p.pid, "command": name})
+        except Exception:
+            pass
+
+    with tool_executions_lock:
+        tools_list = list(tool_executions_log.values())
+        tools_list.sort(key=lambda x: x.get("start_time", ""), reverse=True)
+        recent_tools = []
+        for t in tools_list[:50]:
+            t_copy = t.copy()
+            if "output" in t_copy:
+                del t_copy["output"]
+            recent_tools.append(t_copy)
+
+    return jsonify({
+        "background_processes": bg_procs,
+        "tool_executions": recent_tools
+    })
+
+@webhook_app.route('/api/tool_execution/<tool_call_id>', methods=['GET'])
+def get_tool_execution(tool_call_id):
+    with tool_executions_lock:
+        if tool_call_id in tool_executions_log:
+            return jsonify({"status": "success", "tool_execution": tool_executions_log[tool_call_id]})
+        else:
+            return jsonify({"status": "error", "message": "Tool execution not found"}), 404
 
 
 
@@ -1185,7 +1235,7 @@ def task_failed(reason_for_failure: str) -> str:
     return f"STATUS_FAILED: {reason_for_failure}"
 
 
-def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reasoning_amount: str = "low") -> str:
+def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reasoning_amount: str = "low", parent_tool_call_id: str = None) -> str:
     max_steps = 100
     steps = 0
     exit_tools_schemas = [
@@ -1263,6 +1313,16 @@ def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reaso
             return f"Subagent execution broken due to API error: {str(e)}"
 
         msg = response.choices[0].message
+        if msg.content and parent_tool_call_id:
+            with tool_executions_lock:
+                if parent_tool_call_id in tool_executions_log:
+                    if "subagent_events" not in tool_executions_log[parent_tool_call_id]:
+                        tool_executions_log[parent_tool_call_id]["subagent_events"] = []
+                    tool_executions_log[parent_tool_call_id]["subagent_events"].append({
+                        "type": "thought",
+                        "content": msg.content
+                    })
+
         if not msg.tool_calls:
             messages.append({"role": "assistant", "content": msg.content or ""})
             steps += 1
@@ -1273,6 +1333,17 @@ def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reaso
         for tool_call in msg.tool_calls:
             func_name = tool_call.function.name
             func_args = json.loads(tool_call.function.arguments)
+            
+            if parent_tool_call_id:
+                with tool_executions_lock:
+                    if parent_tool_call_id in tool_executions_log:
+                        if "subagent_events" not in tool_executions_log[parent_tool_call_id]:
+                            tool_executions_log[parent_tool_call_id]["subagent_events"] = []
+                        tool_executions_log[parent_tool_call_id]["subagent_events"].append({
+                            "type": "tool_call",
+                            "tool": func_name,
+                            "args": func_args
+                        })
             try:
                 if func_name == "delegate_to_subagent":
                     tool_output = "Error: Subagents are restricted from spawning recursive subagents."
@@ -1757,16 +1828,41 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
         for tool_call in response_message.tool_calls:
             func_name = tool_call.function.name
             func_args = json.loads(tool_call.function.arguments)
-            add_ui_update("system", context_channel, f"Tool Call: Executing {func_name}({func_args})", agent_name)
+            
+            with tool_executions_lock:
+                tool_executions_log[tool_call.id] = {
+                    "id": tool_call.id,
+                    "tool": func_name,
+                    "agent": agent_name,
+                    "args": func_args,
+                    "status": "running",
+                    "start_time": datetime.now().isoformat(),
+                    "output": None,
+                    "error": None
+                }
+                
+            add_ui_update("system", context_channel, f"Tool Call: Executing {func_name}({func_args})", agent_name, tool_call_id=tool_call.id)
+            error_str = None
             try:
                 if func_name in available_functions:
                     if func_name == "delegate_to_subagent":
                         func_args["agent_name"] = agent_name
+                        func_args["parent_tool_call_id"] = tool_call.id
                     tool_output = available_functions[func_name](**func_args)
                 else:
                     tool_output = call_mcp_tool(func_name, func_args, agent_name)
             except Exception as e:
                 tool_output = f"Error executing tool {func_name}: {str(e)}"
+                error_str = str(e)
+                
+            with tool_executions_lock:
+                if tool_call.id in tool_executions_log:
+                    tool_executions_log[tool_call.id]["status"] = "error" if error_str else "completed"
+                    tool_executions_log[tool_call.id]["end_time"] = datetime.now().isoformat()
+                    tool_executions_log[tool_call.id]["output"] = str(tool_output)
+                    if error_str:
+                        tool_executions_log[tool_call.id]["error"] = error_str
+                        
             with chat_lock:
                 chat_history = load_chat_history(agent_name)
                 chat_history.append({"tool_call_id": tool_call.id, "role": "tool", "name": func_name, "content": str(tool_output)})

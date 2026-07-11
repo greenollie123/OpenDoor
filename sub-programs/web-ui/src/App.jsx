@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import MessageInput from './components/MessageInput';
 import { fetchAgents, loadAgent, fetchUpdates, sendMessage, approveCommand } from './api';
+import ProcessViewer from './components/ProcessViewer';
 
 // Helper to get a cookie value by name
 const getCookie = (name) => {
@@ -26,6 +27,10 @@ function App() {
   const [currentAgent, setCurrentAgent] = useState('Terry');
   const [histories, setHistories] = useState({}); // { [agentName]: { messages: [], lastUpdateId: 0, hasLoaded: false } }
   const [status, setStatus] = useState('Connecting...');
+  
+  // Process Viewer State
+  const [showProcessViewer, setShowProcessViewer] = useState(false);
+  const [selectedToolId, setSelectedToolId] = useState(null);
 
   // Helper to parse raw backend updates
   const parseUpdates = (updates, agentName) => {
@@ -39,7 +44,8 @@ function App() {
         approval_id: u.approval_id,
         decision: u.decision,
         title: u.title,
-        description: u.description
+        description: u.description,
+        tool_call_id: u.tool_call_id
       }))
       .filter(u => u.content !== 'CLEAR');
   };
@@ -158,7 +164,8 @@ function App() {
               approval_id: update.approval_id,
               decision: update.decision,
               title: update.title,
-              description: update.description
+              description: update.description,
+              tool_call_id: update.tool_call_id
             });
           }
           newId = Math.max(newId, update.id + 1);
@@ -220,7 +227,8 @@ function App() {
                 approval_id: update.approval_id,
                 decision: update.decision,
                 title: update.title,
-                description: update.description
+                description: update.description,
+                tool_call_id: update.tool_call_id
               });
             }
             newId = Math.max(newId, update.id + 1);
@@ -380,12 +388,24 @@ function App() {
                 borderRadius: '50%',
                 backgroundColor: status.includes('Connected') || status === 'Preloading histories...' ? 'var(--accent-success)' : 'var(--accent-warning)'
               }}></div>
-              {status}
             </span>
           </div>
-          {/* <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            Port: 5050 Webhook
-          </div> */}
+          <button 
+            onClick={() => setShowProcessViewer(!showProcessViewer)}
+            style={{
+              padding: '6px 14px',
+              backgroundColor: showProcessViewer ? 'var(--accent-primary)' : 'var(--bg-surface)',
+              color: showProcessViewer ? 'var(--bg-main)' : 'var(--text-main)',
+              border: `1px solid ${showProcessViewer ? 'var(--accent-primary)' : 'var(--glass-border)'}`,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: '600',
+              transition: 'all 0.2s',
+              fontSize: '0.85rem'
+            }}
+          >
+            {showProcessViewer ? 'Close Processes' : 'View Processes'}
+          </button>
         </div>
 
         {/* Main Chat Area */}
@@ -394,6 +414,10 @@ function App() {
           agentDetails={agentDetails} 
           onApprove={handleApproveCommand}
           onDeny={handleDenyCommand}
+          onToolClick={(toolId) => {
+            setSelectedToolId(toolId);
+            setShowProcessViewer(true);
+          }}
         />
 
         {/* Input Area */}
@@ -403,6 +427,13 @@ function App() {
           agentDetails={agentDetails} 
         />
       </div>
+
+      <ProcessViewer 
+        isOpen={showProcessViewer} 
+        onClose={() => setShowProcessViewer(false)}
+        selectedToolId={selectedToolId}
+        onSelectTool={setSelectedToolId}
+      />
     </div>
   );
 }

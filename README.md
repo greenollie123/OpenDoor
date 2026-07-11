@@ -116,7 +116,7 @@ chmod +x setup-linux-macos.sh
 
 *Note: After running the setup script, please restart your terminal to apply the PATH changes.*
 
-#### Startup:
+### 3. Startup:
 Start OpenDoor and prepare for first startup.
 Run this in your terminal:
 ```cmd
@@ -155,4 +155,9 @@ You **do not** need to copy configuration files manually.
 * Simply edit your `config.yaml` in your editor, save it, and press **ENTER** in your server terminal window to resume boot.
 * The same automatic copy and pause-to-edit flow happens for `whatsapp_config.yaml` when the WhatsApp subprogram launches.
 
+---
 
+### 🚀 In the future:
+- Voice chat
+- Maybe discord
+- Sub-agents showing on web gui side bit

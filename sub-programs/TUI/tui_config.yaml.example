@@ -1,0 +1,9 @@
+# =================================================================
+# TUI (Terminal User Interface) Configuration
+# =================================================================
+
+# ART_BANNER_NAME: The text string displayed in ASCII art when booting up.
+ART_BANNER_NAME: "OPENDOOR"
+
+# ART_BANNER_FONT: The pyfiglet font type utilized for the boot banner.
+ART_BANNER_FONT: "ansi_shadow"

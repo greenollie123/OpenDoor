@@ -19,6 +19,7 @@ Thumbs.db
 # Project local configuration
 config.yaml
 sub-programs/whatsapp/whatsapp_config.yaml
+sub-programs/TUI/tui_config.yaml
 
 # Runtime workspace & transient data
 master/files/

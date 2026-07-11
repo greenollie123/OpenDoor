@@ -19,29 +19,55 @@ from textual.widgets import Footer, Header, Input, Markdown, OptionList, Static
 VALID_CONFIG = True
 
 MAIN_DIR = Path(__file__).resolve().parent.parent.parent
+TUI_DIR = Path(__file__).resolve().parent
 
-MAIN_CONFIG = os.path.join(MAIN_DIR, "config.yaml")
+CONFIG_FILE = os.path.join(TUI_DIR, "tui_config.yaml")
 
-# Set this variable to the absolute or relative path of your config script/file
-CONFIG_LOCATION = MAIN_CONFIG
+def load_config():
+    global VALID_CONFIG
+    if not os.path.exists(CONFIG_FILE):
+        import shutil
+        example_file = CONFIG_FILE + ".example"
+        if os.path.exists(example_file):
+            shutil.copy(example_file, CONFIG_FILE)
+            print(f"'{CONFIG_FILE}' was not found. Automatically copied from '{os.path.basename(example_file)}'.")
+        else:
+            print(f"Error: '{CONFIG_FILE}' and its template '{os.path.basename(example_file)}' are both missing.")
+            print("Please restore the config template or create tui_config.yaml manually.")
+            print("\nPress ENTER to close...")
+            input()
+            VALID_CONFIG = False
+            return None
+            
+        print("\n" + "="*60)
+        print(f" ACTION REQUIRED: Please open and edit '{os.path.basename(CONFIG_FILE)}' now.")
+        print(" Set your desired ART_BANNER_NAME and ART_BANNER_FONT settings.")
+        print("="*60)
+        print("\nPress ENTER when you are done editing to continue...")
+        input()
 
-if not os.path.exists(CONFIG_LOCATION):
-    print(f"'{CONFIG_LOCATION}' not found. Please start the main script and then restart this script.")
-    print("\nPress ENTER to close...")
-    input()  
-    VALID_CONFIG = False
-
-if VALID_CONFIG:
-    # Safely load the YAML configuration and convert it to a namespace object
     try:
-        with open(CONFIG_LOCATION, "r", encoding="utf-8") as f:
-            config_dict = yaml.safe_load(f)
-        config = SimpleNamespace(**config_dict)
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            loaded_config = yaml.safe_load(f)
     except Exception as e:
-        print(f"Error: '{CONFIG_LOCATION}' contains invalid YAML formatting. Please fix your config file or delete it to regenerate a fresh template.")
+        print(f"Error: '{CONFIG_FILE}' contains invalid YAML formatting. Please fix your config file or delete it to regenerate a fresh template.")
         print("\nPress ENTER to close...")
         input()  
         VALID_CONFIG = False
+        return None
+
+    if not isinstance(loaded_config, dict):
+        loaded_config = {}
+
+    defaults = {
+        "ART_BANNER_NAME": "OPENDOOR",
+        "ART_BANNER_FONT": "ansi_shadow"
+    }
+
+    merged = {**defaults, **loaded_config}
+    return SimpleNamespace(**merged)
+
+config = load_config()
 
 if VALID_CONFIG:
     BACKEND_URL = "http://127.0.0.1:5050/api/message"

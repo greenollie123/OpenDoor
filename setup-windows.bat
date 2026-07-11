@@ -36,8 +36,17 @@ echo.
 echo [3/3] Setting up PATH environment variable...
 powershell -NoProfile -Command "$p = [System.Environment]::GetEnvironmentVariable('PATH', 'User'); if (-not $p.Split(';').Contains('%DIR%\terminal')) { [System.Environment]::SetEnvironmentVariable('PATH', $p + ';%DIR%\terminal', 'User'); Write-Host 'Added to PATH successfully!' -ForegroundColor Green } else { Write-Host 'Already in PATH.' -ForegroundColor Yellow }"
 
+REM 4. Launch configuration wizard
+echo.
+echo [4/4] Starting configuration wizard...
+if exist "%DIR%\venv\Scripts\python.exe" (
+    "%DIR%\venv\Scripts\python.exe" "%DIR%\terminal\setup.py"
+) else (
+    python "%DIR%\terminal\setup.py"
+)
+
 echo.
 echo OpenDoor setup complete! 
 echo Please restart your terminal/command prompt to apply PATH changes.
-echo You will then be able to run 'opendoor' or 'opendoor-server' from anywhere.
+echo "OpenDoor setup complete! You can now run 'opendoor launch --terminal' to start."
 pause

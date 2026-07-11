@@ -70,5 +70,14 @@ else
     echo "OpenDoor terminal directory is already in your shell profiles PATH."
 fi
 
+# 5. Launch configuration wizard
 echo ""
-echo "OpenDoor setup complete! You can now run 'opendoor'."
+echo "Starting configuration wizard..."
+if [ -f "$DIR/venv/bin/python" ]; then
+    "$DIR/venv/bin/python" "$DIR/terminal/setup.py"
+else
+    python3 "$DIR/terminal/setup.py"
+fi
+
+echo ""
+echo "OpenDoor setup complete! You can now run 'opendoor launch --terminal' to start."

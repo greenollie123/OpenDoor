@@ -12,6 +12,8 @@ if exist "%ROOT_DIR%\venv\Scripts\python.exe" (
 )
 
 set "ACTION=%~1"
+if "%ACTION%"=="setup" goto :run_setup
+if "%ACTION%"=="configure" goto :run_setup
 if "%ACTION%"=="launch" goto :launch_server
 if "%ACTION%"=="start" goto :launch_server
 if "%ACTION%"=="run" goto :launch_server
@@ -19,6 +21,10 @@ if "%ACTION%"=="server" goto :launch_server
 
 REM Run terminal client if not matching launch actions
 "%PYTHON_EXE%" "%CURRENT_DIR%\terminal.py" %*
+goto :eof
+
+:run_setup
+"%PYTHON_EXE%" "%CURRENT_DIR%\setup.py" %*
 goto :eof
 
 :launch_server

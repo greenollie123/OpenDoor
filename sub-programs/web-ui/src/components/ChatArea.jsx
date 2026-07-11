@@ -56,13 +56,13 @@ const ChatArea = ({ history, agentDetails, onApprove, onDeny }) => {
             gap: '12px'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-warning)', fontWeight: '600' }}>
-              <span style={{ fontSize: '1.1rem' }}>⚠️</span> Terminal Command Authorization
+              <span style={{ fontSize: '1.1rem' }}>⚠️</span> {msg.title || "Terminal Command Authorization"}
             </div>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: 0 }}>
-              The agent is requesting permission to execute the following shell command:
+              {msg.description ? "The agent is requesting permission for the following action:" : "The agent is requesting permission to execute the following shell command:"}
             </p>
             <div style={{
-              fontFamily: 'Courier New, Courier, monospace',
+              fontFamily: msg.description ? 'inherit' : 'Courier New, Courier, monospace',
               backgroundColor: 'rgba(0, 0, 0, 0.4)',
               padding: '12px',
               borderRadius: '8px',
@@ -72,7 +72,7 @@ const ChatArea = ({ history, agentDetails, onApprove, onDeny }) => {
               wordBreak: 'break-all',
               border: '1px solid rgba(255, 255, 255, 0.05)'
             }}>
-              {msg.content}
+              {msg.description || msg.content}
             </div>
             
             {isPending && (

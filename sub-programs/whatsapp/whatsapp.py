@@ -553,9 +553,10 @@ if VALID_CONFIG and config is not None:
                             resolved_jid = build_jid(user, server)
                         else:
                             resolved_jid = build_jid(chat_id)
-                        
+                    
+                    parts = command.split("\n")
                     poll_message = client.build_poll_vote_creation(
-                        name=f"⚠️ Terminal Command Authorization\nAgent: `{agent_name}`\nCommand: `{command}`",
+                        name=f"⚠️ Tool Authorization\nAgent: `{agent_name}`\n{parts[0]}\n`{parts[1]}`",
                         options=["Approve", "Deny"],
                         selectable_count=VoteType.SINGLE
                     )

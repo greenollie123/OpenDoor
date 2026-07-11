@@ -7,6 +7,11 @@ def run_command(command: str) -> str:
     Args:
         command: The terminal command line string to run.
     """
+    if "ask_for_consent" in globals():
+        approval = ask_for_consent("Terminal Command", command)
+        if approval != "approved":
+            return "Error: Command execution denied by user."
+            
     try:
         result = subprocess.run(
             command, 

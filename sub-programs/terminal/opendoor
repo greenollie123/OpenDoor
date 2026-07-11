@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Get the directory of this script
+CURRENT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ROOT_DIR="$( cd "$CURRENT_DIR/../.." && pwd )"
+
+if [ -f "$ROOT_DIR/venv/bin/python" ]; then
+    PYTHON_EXE="$ROOT_DIR/venv/bin/python"
+else
+    PYTHON_EXE="python3"
+fi
+
+if [ "$1" = "launch" ] || [ "$1" = "start" ] || [ "$1" = "run" ] || [ "$1" = "server" ]; then
+    "$PYTHON_EXE" "$ROOT_DIR/main.py"
+else
+    "$PYTHON_EXE" "$CURRENT_DIR/terminal.py" "$@"
+fi

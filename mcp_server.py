@@ -60,6 +60,70 @@ def cosine_similarity(v1: list, v2: list) -> float:
     return dot_product / (norm_a * norm_b)
 
 
+def ask_for_consent(title: str, description: str) -> str:
+    """Ask the user for consent or approval before carrying out an action.
+    
+    Args:
+        title: The title/summary of the action requiring approval.
+        description: The detailed description or command to run.
+        
+    Returns:
+        "approved" or "denied"
+    """
+    import inspect
+    caller_tool_name = None
+    for frame_info in inspect.stack():
+        func_name = frame_info.function
+        if frame_info.filename.endswith(".py") and "tools" in frame_info.filename:
+            caller_tool_name = func_name
+            break
+            
+    try:
+        resp = requests.post(
+            "http://127.0.0.1:5050/api/request_consent",
+            json={
+                "title": title,
+                "description": description,
+                "tool_name": caller_tool_name
+            },
+            timeout=300
+        )
+        if resp.status_code == 200:
+            return resp.json().get("action", "denied")
+    except Exception as e:
+        print(f"[-] Error requesting consent: {e}")
+    return "denied"
+
+
+@mcp.tool(name="ask_for_consent")
+def ask_for_consent_tool(title: str, description: str) -> str:
+    """Ask the user for consent or approval before carrying out an action.
+    
+    Args:
+        title: The title/summary of the action requiring approval.
+        description: The detailed description or command to run.
+    """
+    return ask_for_consent(title, description)
+
+
+@mcp.tool(name="restart_mcp_server")
+def restart_mcp_server() -> str:
+    """Restart the MCP server to reload all core and custom tools from disk. Call this tool after adding, modifying, or deleting tools."""
+    import threading
+    import time
+    
+    def self_destruct():
+        time.sleep(0.5)
+        import sys
+        sys.stderr.write("Exiting MCP server for restart...\n")
+        sys.stderr.flush()
+        os._exit(0)
+        
+    threading.Thread(target=self_destruct, daemon=True).start()
+    return "Restarting MCP server... Connection will reconnect automatically."
+
+
+
 # --- DYNAMIC TOOL LOADING ---
 CORE_TOOLS_DIR = os.path.join(ROOT_DIR, "tools")
 CUSTOM_TOOLS_DIR = os.path.join(AI_WORKSPACE_DIR, "custom-tools")
@@ -84,6 +148,7 @@ for search_dir in [CORE_TOOLS_DIR, CUSTOM_TOOLS_DIR]:
                 module.LONGITUDE = LONGITUDE
                 module.get_embedding = get_embedding
                 module.cosine_similarity = cosine_similarity
+                module.ask_for_consent = ask_for_consent
                 
                 # Inject standard libraries commonly used
                 module.os = os

@@ -21,7 +21,9 @@ function App() {
         id: u.id,
         agent: u.type === 'agent' || u.type === 'assistant' ? agentName : null,
         approval_id: u.approval_id,
-        decision: u.decision
+        decision: u.decision,
+        title: u.title,
+        description: u.description
       }))
       .filter(u => u.content !== 'CLEAR');
   };
@@ -132,7 +134,9 @@ function App() {
               id: update.id,
               agent: update.type === 'agent' || update.type === 'assistant' ? currentAgent : null,
               approval_id: update.approval_id,
-              decision: update.decision
+              decision: update.decision,
+              title: update.title,
+              description: update.description
             });
           }
           newId = Math.max(newId, update.id + 1);
@@ -191,7 +195,9 @@ function App() {
                 id: update.id,
                 agent: update.type === 'agent' || update.type === 'assistant' ? agent : null,
                 approval_id: update.approval_id,
-                decision: update.decision
+                decision: update.decision,
+                title: update.title,
+                description: update.description
               });
             }
             newId = Math.max(newId, update.id + 1);

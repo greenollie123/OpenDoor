@@ -36,6 +36,8 @@ ui_updates_lock = threading.Lock()
 
 pending_approvals = {}
 pending_approvals_lock = threading.Lock()
+active_tool_contexts = {}
+active_tool_contexts_lock = threading.Lock()
 request_context = threading.local()
 
 def add_ui_update(update_type, channel, content, agent="Terry", **kwargs):
@@ -121,6 +123,7 @@ mcp_loop = None
 mcp_session = None
 mcp_thread = None
 mcp_client_context = None
+mcp_restart_event = None
 
 MAIN_DIR = Path(__file__).resolve().parent
 
@@ -325,6 +328,43 @@ def handle_webhook_message():
     sender_id = data.get("sender_id")
     chat_id = data.get("chat_id")
     
+    # Check for pending text tool authorizations
+    found_pending = None
+    pending_appr_id = None
+    with pending_approvals_lock:
+        for app_id, info in pending_approvals.items():
+            if info.get("status") == "pending" and info.get("agent_name") == agent:
+                if info.get("channel") not in ["Web", "WhatsApp"]:
+                    found_pending = info
+                    pending_appr_id = app_id
+                    break
+
+    if found_pending:
+        text_lower = text.lower()
+        import re
+        is_approved = any(re.search(rf"\b{word}\b", text_lower) for word in ["yes", "accept", "go"])
+        is_denied = any(re.search(rf"\b{word}\b", text_lower) for word in ["no", "deny", "cancel", "reject", "stop"])
+        
+        if is_approved or is_denied:
+            decision = "approved" if is_approved else "denied"
+            with pending_approvals_lock:
+                if pending_appr_id in pending_approvals:
+                    pending_approvals[pending_appr_id]["status"] = decision
+                    with ui_updates_lock:
+                        for u in ui_updates:
+                            if u.get("approval_id") == pending_appr_id:
+                                u["decision"] = decision
+                    found_pending["event"].set()
+            
+            status_text = "approved" if is_approved else "denied"
+            reply_text = f"Tool Authorization {status_text}."
+            add_ui_update("user", channel, text, agent)
+            add_ui_update("system", channel, f"Authorization {status_text} by user text: '{text}'", agent)
+            return jsonify({"reply": reply_text})
+        else:
+            reply_text = f"⚠️ Tool Authorization is pending for agent '{agent}'. Please reply with 'yes', 'accept', or 'go' to allow the action, or 'no'/'cancel' to deny it."
+            return jsonify({"reply": reply_text})
+
     if channel == "WhatsApp":
         def run_async_process(c_id, s_id):
             request_context.channel = channel
@@ -374,6 +414,94 @@ def handle_approval():
             return jsonify({"status": "success"})
             
     return jsonify({"error": "Approval request not found or already processed"}), 404
+
+
+@webhook_app.route('/api/request_consent', methods=['POST'])
+def handle_request_consent():
+    import random
+    import time
+    data = request.json or {}
+    title = data.get("title", "Action Authorization")
+    description = data.get("description", "")
+    tool_name = data.get("tool_name")
+    
+    # Retrieve context based on tool_name
+    context = {}
+    if tool_name:
+        with active_tool_contexts_lock:
+            context = active_tool_contexts.get(tool_name, {})
+            
+    # Fallback to current request_context fields
+    channel = context.get("channel") or getattr(request_context, "channel", "External")
+    chat_id = context.get("chat_id") or getattr(request_context, "chat_id", None)
+    sender_id = context.get("sender_id") or getattr(request_context, "sender_id", None)
+    agent_name = context.get("agent_name") or "Terry"
+    
+    approval_id = f"appr_{int(time.time())}_{random.randint(1000, 9999)}"
+    event = threading.Event()
+    
+    with pending_approvals_lock:
+        pending_approvals[approval_id] = {
+            "status": "pending",
+            "title": title,
+            "description": description,
+            "event": event,
+            "agent_name": agent_name,
+            "channel": channel
+        }
+        
+    if channel not in ["Web", "WhatsApp"]:
+        # Text tool authentication for non-Web, non-WhatsApp channels
+        auth_msg = (
+            "⚠️ Tool Authorization\n"
+            f"Agent: `{agent_name}`\n"
+            f"{title}\n"
+            f"`{description}`\n\n"
+            "Reply `accept` or `deny` to respond."
+        )
+        add_ui_update(
+            update_type="system",
+            channel=channel,
+            content=auth_msg,
+            agent=agent_name
+        )
+    else:
+        if channel == "Web":
+            add_ui_update(
+                update_type="approval_request",
+                channel=channel,
+                content=description,
+                title=title,
+                description=description,
+                agent=agent_name,
+                approval_id=approval_id,
+                decision="pending"
+            )
+        elif channel == "WhatsApp":
+            if chat_id:
+                try:
+                    payload = {
+                        "chat_id": chat_id,
+                        "command": f"{title}\n{description}",
+                        "approval_id": approval_id,
+                        "agent_name": agent_name
+                    }
+                    resp = requests.post("http://127.0.0.1:5056/send_poll", json=payload, timeout=10)
+                    if resp.status_code != 200:
+                        print(f"[-] WhatsApp listener returned error: {resp.text}")
+                except Exception as ex:
+                    print(f"[-] Failed to communicate with WhatsApp approval listener: {ex}")
+            else:
+                print("[-] Cannot request consent: chat_id is missing from context.")
+                
+    event.wait()
+    
+    with pending_approvals_lock:
+        approval_info = pending_approvals.get(approval_id)
+        decision = approval_info["status"] if approval_info else "denied"
+        pending_approvals.pop(approval_id, None)
+        
+    return jsonify({"action": decision})
 
 
 
@@ -592,6 +720,46 @@ def update_agent_skills():
 
 
 
+def run_in_new_terminal(script_path):
+    if not os.path.exists(script_path):
+        return None
+
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        try:
+            return subprocess.Popen([sys.executable, script_path], creationflags=creationflags)
+        except Exception as e:
+            print(f"Warning: Failed to start script in new console on Windows: {e}")
+            return None
+    elif sys.platform == "darwin":
+        import shlex
+        cmd = f'{shlex.quote(sys.executable)} {shlex.quote(script_path)}'
+        applescript = f'tell application "Terminal" to do script {shlex.quote(cmd)}'
+        try:
+            return subprocess.Popen(["osascript", "-e", applescript])
+        except Exception as e:
+            print(f"Warning: Failed to start script in new terminal on macOS: {e}")
+            return None
+    else:
+        import shlex
+        cmd_args = [sys.executable, script_path]
+        for term in ["gnome-terminal", "konsole", "xfce4-terminal", "lxterminal", "xterm"]:
+            if shutil.which(term):
+                try:
+                    if term == "gnome-terminal":
+                        return subprocess.Popen([term, "--"] + cmd_args)
+                    else:
+                        return subprocess.Popen([term, "-e"] + cmd_args)
+                except Exception as e:
+                    print(f"Warning: Failed to start script in terminal {term}: {e}")
+        # Fallback to background process
+        try:
+            return subprocess.Popen([sys.executable, script_path])
+        except Exception as e:
+            print(f"Warning: Failed to start script as fallback background process on Linux: {e}")
+            return None
+
+
 def start_subprograms():
     if not os.path.exists(SUBPROGRAMS_DIR):
         return
@@ -599,6 +767,7 @@ def start_subprograms():
     voice_script = os.path.join(SUBPROGRAMS_DIR, "voice", "voice-detector.py")
     whatsapp_script = os.path.join(SUBPROGRAMS_DIR, "whatsapp", "whatsapp.py")
     tui_script = os.path.join(SUBPROGRAMS_DIR, "TUI", "TUI.py")
+    terminal_script = os.path.join(SUBPROGRAMS_DIR, "terminal", "terminal.py")
     web_ui_dir = os.path.join(SUBPROGRAMS_DIR, "web-ui")
 
     if os.path.exists(voice_script):
@@ -616,11 +785,11 @@ def start_subprograms():
             print(f"Warning: Failed to start WhatsApp script: {e}")
 
     if os.path.exists(tui_script):
-        try:
-            proc = subprocess.Popen([sys.executable, tui_script], creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+        proc = run_in_new_terminal(tui_script)
+        if proc:
             subprocesses.append(proc)
-        except Exception as e:
-            print(f"Warning: Failed to start TUI script: {e}")
+        else:
+            print("Warning: Failed to start TUI script in a new terminal.")
 
     if os.path.exists(web_ui_dir) and os.path.exists(os.path.join(web_ui_dir, "package.json")):
         npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
@@ -645,9 +814,10 @@ def _ui_call(method_name, *args, **kwargs):
 
 
 def start_mcp_thread():
-    global mcp_loop
+    global mcp_loop, mcp_restart_event
     mcp_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(mcp_loop)
+    mcp_restart_event = asyncio.Event()
     
     async def run_mcp_client():
         global mcp_session, mcp_client_context
@@ -656,18 +826,45 @@ def start_mcp_thread():
             args=[str(ROOT_DIR / "mcp_server.py")],
             env=os.environ.copy()
         )
-        print("Starting MCP server...")
-        try:
-            mcp_client_context = stdio_client(server_params)
-            async with mcp_client_context as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    mcp_session = session
-                    print("MCP connection initialized successfully.")
-                    while True:
-                        await asyncio.sleep(1)
-        except Exception as e:
-            print(f"MCP client connection failed: {e}")
+        while True:
+            print("Starting MCP server...", flush=True)
+            try:
+                mcp_client_context = stdio_client(server_params)
+                async with mcp_client_context as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        
+                        # Rebuild tools with pre-fetched schemas first
+                        try:
+                            result = await session.list_tools()
+                            _build_tools(result.tools)
+                            print("MCP tools rebuilt successfully on startup/reconnect.", flush=True)
+                        except Exception as list_err:
+                            print(f"Error pre-fetching MCP tools: {list_err}", flush=True)
+                            
+                        # Set session global variable only after tools are fully ready
+                        mcp_session = session
+                        print("MCP connection initialized successfully.", flush=True)
+                            
+                        # Monitor session status and look for restart requests or connection health
+                        while not mcp_restart_event.is_set():
+                            try:
+                                await session.send_ping()
+                            except Exception:
+                                print("MCP server connection lost (ping failed).", flush=True)
+                                break
+                            await asyncio.sleep(0.5)
+                        if mcp_restart_event.is_set():
+                            print("MCP restart event detected.", flush=True)
+            except Exception as e:
+                print(f"MCP client connection failed/lost: {e}", flush=True)
+            finally:
+                mcp_session = None
+                mcp_client_context = None
+                mcp_restart_event.clear()
+                
+            print("Reconnecting MCP server in 1 second...", flush=True)
+            await asyncio.sleep(1)
             
     mcp_loop.create_task(run_mcp_client())
     mcp_loop.run_forever()
@@ -687,7 +884,7 @@ def get_mcp_tools():
         result = future.result(timeout=5)
         return result.tools
     except Exception as e:
-        print(f"Error fetching MCP tools: {e}")
+        print(f"Error fetching MCP tools: {repr(e)}", flush=True)
         return []
 
 
@@ -696,62 +893,15 @@ def call_mcp_tool(name: str, arguments: dict, agent_name: str = "Terry"):
         raise RuntimeError("MCP server not connected.")
         
     channel = getattr(request_context, "channel", "External")
-    if name == "run_command" and channel in ["Web", "WhatsApp"]:
-        import random
-        import time
-        approval_id = f"appr_{int(time.time())}_{random.randint(1000, 9999)}"
+    
+    with active_tool_contexts_lock:
+        active_tool_contexts[name] = {
+            "channel": channel,
+            "sender_id": getattr(request_context, "sender_id", None),
+            "chat_id": getattr(request_context, "chat_id", None),
+            "agent_name": agent_name
+        }
         
-        event = threading.Event()
-        with pending_approvals_lock:
-            pending_approvals[approval_id] = {
-                "status": "pending",
-                "command": arguments.get("command"),
-                "event": event
-            }
-            
-        print(f"[*] Command approval requested: ID={approval_id}, Command={arguments.get('command')}")
-        
-        if channel == "Web":
-            add_ui_update(
-                update_type="approval_request",
-                channel=channel,
-                content=arguments.get("command"),
-                agent=agent_name,
-                approval_id=approval_id,
-                decision="pending"
-            )
-        elif channel == "WhatsApp":
-            sender_id = getattr(request_context, "sender_id", None)
-            chat_id = getattr(request_context, "chat_id", None)
-            if chat_id:
-                try:
-                    payload = {
-                        "chat_id": chat_id,
-                        "command": arguments.get("command"),
-                        "approval_id": approval_id,
-                        "agent_name": agent_name
-                    }
-                    resp = requests.post("http://127.0.0.1:5056/send_poll", json=payload, timeout=10)
-                    if resp.status_code != 200:
-                        print(f"[-] WhatsApp listener returned error: {resp.text}")
-                except Exception as ex:
-                    print(f"[-] Failed to communicate with WhatsApp approval listener: {ex}")
-            else:
-                print("[-] Cannot request command approval: chat_id is missing from context.")
-        
-        event.wait()
-        
-        with pending_approvals_lock:
-            approval_info = pending_approvals.get(approval_id)
-            decision = approval_info["status"] if approval_info else "denied"
-            pending_approvals.pop(approval_id, None)
-            
-        if decision != "approved":
-            print(f"[*] Command denied: ID={approval_id}")
-            return "Error: Command execution denied by user."
-            
-        print(f"[*] Command approved: ID={approval_id}, executing now...")
-
     try:
         if name in ["add_memory", "remove_memory"]:
             arguments["agent_name"] = agent_name
@@ -769,6 +919,9 @@ def call_mcp_tool(name: str, arguments: dict, agent_name: str = "Terry"):
     except Exception as e:
         error_msg = str(e) if str(e) else type(e).__name__
         return f"Error executing tool {name} via MCP: {error_msg}"
+    finally:
+        with active_tool_contexts_lock:
+            active_tool_contexts.pop(name, None)
 
 
 def get_embedding(text: str) -> list:
@@ -1081,14 +1234,16 @@ def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reaso
     return f"Subagent execution failed: Reached maximum step limit ({max_steps}) without cleanly declaring complete or failed status."
 
 
-def _build_tools():
+def _build_tools(mcp_tools=None):
     global tools, available_functions
     
     # Fetch MCP tools
-    mcp_tools = get_mcp_tools()
-    tools = []
+    if mcp_tools is None:
+        mcp_tools = get_mcp_tools()
+        
+    new_tools = []
     for t in mcp_tools:
-        tools.append({
+        new_tools.append({
             "type": "function",
             "function": {
                 "name": t.name,
@@ -1098,7 +1253,7 @@ def _build_tools():
         })
         
     # Add local delegate_to_subagent
-    tools.append({
+    new_tools.append({
         "type": "function",
         "function": {
             "name": "delegate_to_subagent",
@@ -1120,6 +1275,7 @@ def _build_tools():
             }
         }
     })
+    tools = new_tools
     
     available_functions = {
         "delegate_to_subagent": delegate_to_subagent,
@@ -1249,18 +1405,43 @@ def update_and_get_agent_skills(agent_name: str) -> list:
         else:
             enabled_skills.append(s)
             
+    def get_skill_desc(s):
+        skill_file = os.path.join(skills_dir, s, "SKILL.md")
+        desc = ""
+        if os.path.exists(skill_file):
+            try:
+                with open(skill_file, "r", encoding="utf-8") as sf:
+                    content = sf.read().strip()
+                if content.startswith("---"):
+                    parts = content.split("---", 2)
+                    if len(parts) >= 3:
+                        frontmatter = yaml.safe_load(parts[1])
+                        if isinstance(frontmatter, dict):
+                            desc = frontmatter.get("description", "")
+            except Exception:
+                pass
+        return desc
+
     skills_md_path = os.path.join(agent_files_dir, "SKILLS.md")
     with open(skills_md_path, "w", encoding="utf-8") as f:
         f.write("### Skills Status\n\n")
         f.write("**Enabled skills:**\n")
         for s in enabled_skills:
-            f.write(f"- {s}\n")
+            desc = get_skill_desc(s)
+            if desc:
+                f.write(f"- {s} - {desc}\n")
+            else:
+                f.write(f"- {s}\n")
         if not enabled_skills:
             f.write("- None\n")
             
         f.write("\n**Disabled skills:**\n")
         for s in disabled_skills_present:
-            f.write(f"- {s}\n")
+            desc = get_skill_desc(s)
+            if desc:
+                f.write(f"- {s} - {desc}\n")
+            else:
+                f.write(f"- {s}\n")
         if not disabled_skills_present:
             f.write("- None\n")
             
@@ -1380,11 +1561,17 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
     agent_model = agent_info["AI_MODEL"]
     agent_name_str = agent_info["AI_NAME"]
 
+    import platform
+    os_name = platform.system()
+    if os_name == "Darwin":
+        os_name = "MacOS"
+
     raw_system_content = load_system_prompt(agent_name, clean_prompt_text)
     system_prompt_message = {
         "role": "system",
         "content": (
             f"CURRENT TIME: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"OPERATING SYSTEM: {os_name}\n"
             f"You are the agent: '{agent_name}'. Your configuration-specific directory is 'agents/{agent_name}'.\n"
             f"Your archived sessions are saved under 'agents/{agent_name}/archived-sessions'.\n"
             f"{raw_system_content}\n\n"
@@ -1422,6 +1609,40 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
 
     with chat_lock:
         chat_history = load_chat_history(agent_name)
+        
+        # Self-heal chat history from any orphaned assistant tool calls
+        fixed_history = []
+        history_changed = False
+        for i, msg in enumerate(chat_history):
+            fixed_history.append(msg)
+            if msg.get("role") == "assistant" and "tool_calls" in msg and msg["tool_calls"]:
+                tc_ids = [tc["id"] for tc in msg["tool_calls"]]
+                responded_ids = set()
+                for j in range(i + 1, len(chat_history)):
+                    next_msg = chat_history[j]
+                    if next_msg.get("role") == "tool" and next_msg.get("tool_call_id") in tc_ids:
+                        responded_ids.add(next_msg["tool_call_id"])
+                    elif next_msg.get("role") != "tool":
+                        break
+                for tc_id in tc_ids:
+                    if tc_id not in responded_ids:
+                        tool_name = "unknown"
+                        for tc in msg["tool_calls"]:
+                            if tc["id"] == tc_id:
+                                tool_name = tc.get("function", {}).get("name", "unknown")
+                                break
+                        dummy_msg = {
+                            "tool_call_id": tc_id,
+                            "role": "tool",
+                            "name": tool_name,
+                            "content": "Error: Tool execution was interrupted or cancelled."
+                        }
+                        fixed_history.append(dummy_msg)
+                        history_changed = True
+                        
+        if history_changed:
+            chat_history = fixed_history
+            
         chat_history.append(user_message_to_append)
         save_chat_history(agent_name, chat_history)
 

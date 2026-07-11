@@ -329,7 +329,7 @@ if VALID_CONFIG:
                 pass
 
         def mount_sys_log(self, content: str) -> None:
-            self.chat_container.mount(Static(f"[SYS] {content}", classes="system-log"))
+            self.chat_container.mount(Markdown(f"**[SYS]** {content}", classes="system-log"))
             self.chat_container.scroll_end(animate=False)
 
         def mount_user_msg(self, context_channel: str, content: str) -> None:
@@ -423,7 +423,7 @@ if VALID_CONFIG:
                         "text": text,
                         "agent": self.current_agent
                     },
-                    timeout=20,
+                    timeout=300,
                 )
             except Exception as exc:
                 self.call_from_thread(self.mount_sys_log, f"Error contacting backend: {exc}")

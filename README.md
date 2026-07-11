@@ -156,15 +156,9 @@ Or execute one-off commands from your shell:
 opendoor ask Terry "what is the weather today?"
 ```
 
-### ⚙️ Automatic Configuration Bootstrap
-You **do not** need to copy configuration files manually. 
-* On first startup, the server will automatically detect if `config.yaml` is missing, copy it from `config.yaml.example`, and pause execution.
-* Simply edit your `config.yaml` in your editor, save it, and press **ENTER** in your server terminal window to resume boot.
-* The same automatic copy and pause-to-edit flow happens for `whatsapp_config.yaml` when the WhatsApp subprogram launches.
-
 ---
 
 ### 🚀 In the future:
-- Voice chat
-- Maybe discord
-- Sub-agents showing on web gui side bit
+[ ] Voice chat
+[ ] Maybe discord
+[x] Sub-agents showing on web gui side bit 

@@ -106,7 +106,7 @@ Run this in your terminal:
 ```cmd
 opendoor launch --terminal
 ```
-`--terminal` is used to allow for connecting to whatsapp and checking configs.
+*`--terminal` is used to allow for connecting to whatsapp and checking configs.*
 
 ---
 

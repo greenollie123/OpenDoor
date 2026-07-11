@@ -120,6 +120,7 @@ Run any of the following alias commands:
 opendoor launch
 ```
 This launches the multi-agent Flask coordinator on `http://127.0.0.1:5050` and automatically boots up the subprograms (TUI, Terminal, WhatsApp, Web UI) in separate terminal/console windows depending on what is available.
+The parameters `--terminal` is required on the first startup.
 
 ### 2. Run the Terminal Client
 You can chat with your agents interactively in the terminal by running:

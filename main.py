@@ -720,41 +720,42 @@ def update_agent_skills():
 
 
 
-def run_in_new_terminal(script_path):
-    if not os.path.exists(script_path):
+def run_in_new_terminal(args, cwd=None):
+    if isinstance(args, str):
+        args = [sys.executable, args]
+    if not args:
         return None
 
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         try:
-            return subprocess.Popen([sys.executable, script_path], creationflags=creationflags)
+            return subprocess.Popen(args, creationflags=creationflags, cwd=cwd)
         except Exception as e:
             print(f"Warning: Failed to start script in new console on Windows: {e}")
             return None
     elif sys.platform == "darwin":
         import shlex
-        cmd = f'{shlex.quote(sys.executable)} {shlex.quote(script_path)}'
+        cmd = " ".join(shlex.quote(arg) for arg in args)
         applescript = f'tell application "Terminal" to do script {shlex.quote(cmd)}'
         try:
-            return subprocess.Popen(["osascript", "-e", applescript])
+            return subprocess.Popen(["osascript", "-e", applescript], cwd=cwd)
         except Exception as e:
             print(f"Warning: Failed to start script in new terminal on macOS: {e}")
             return None
     else:
         import shlex
-        cmd_args = [sys.executable, script_path]
         for term in ["gnome-terminal", "konsole", "xfce4-terminal", "lxterminal", "xterm"]:
             if shutil.which(term):
                 try:
                     if term == "gnome-terminal":
-                        return subprocess.Popen([term, "--"] + cmd_args)
+                        return subprocess.Popen([term, "--"] + args, cwd=cwd)
                     else:
-                        return subprocess.Popen([term, "-e"] + cmd_args)
+                        return subprocess.Popen([term, "-e"] + args, cwd=cwd)
                 except Exception as e:
                     print(f"Warning: Failed to start script in terminal {term}: {e}")
         # Fallback to background process
         try:
-            return subprocess.Popen([sys.executable, script_path])
+            return subprocess.Popen(args, cwd=cwd)
         except Exception as e:
             print(f"Warning: Failed to start script as fallback background process on Linux: {e}")
             return None
@@ -770,22 +771,47 @@ def start_subprograms():
     terminal_script = os.path.join(SUBPROGRAMS_DIR, "terminal", "terminal.py")
     web_ui_dir = os.path.join(SUBPROGRAMS_DIR, "web-ui")
 
+    show_terminal = "--terminal" in sys.argv
+    print(f"[*] Starting subprograms. show_terminal={show_terminal} (sys.argv={sys.argv})")
+
     if os.path.exists(voice_script):
         try:
-            proc = subprocess.Popen([sys.executable, voice_script], creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-            subprocesses.append(proc)
+            if show_terminal:
+                proc = run_in_new_terminal([sys.executable, voice_script])
+            else:
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                proc = subprocess.Popen(
+                    [sys.executable, voice_script],
+                    creationflags=creationflags,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            if proc:
+                subprocesses.append(proc)
         except Exception as e:
             print(f"Warning: Failed to start voice script: {e}")
 
     if os.path.exists(whatsapp_script):
         try:
-            proc = subprocess.Popen([sys.executable, whatsapp_script], creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-            subprocesses.append(proc)
+            if show_terminal:
+                proc = run_in_new_terminal([sys.executable, whatsapp_script])
+            else:
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                proc = subprocess.Popen(
+                    [sys.executable, whatsapp_script],
+                    creationflags=creationflags,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            if proc:
+                subprocesses.append(proc)
         except Exception as e:
             print(f"Warning: Failed to start WhatsApp script: {e}")
 
     if os.path.exists(tui_script):
-        proc = run_in_new_terminal(tui_script)
+        proc = run_in_new_terminal([sys.executable, tui_script])
         if proc:
             subprocesses.append(proc)
         else:
@@ -794,8 +820,20 @@ def start_subprograms():
     if os.path.exists(web_ui_dir) and os.path.exists(os.path.join(web_ui_dir, "package.json")):
         npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
         try:
-            proc = subprocess.Popen([npm_cmd, "run", "dev"], cwd=web_ui_dir, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-            subprocesses.append(proc)
+            if show_terminal:
+                proc = run_in_new_terminal([npm_cmd, "run", "dev"], cwd=web_ui_dir)
+            else:
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                proc = subprocess.Popen(
+                    [npm_cmd, "run", "dev"], 
+                    cwd=web_ui_dir,
+                    creationflags=creationflags,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            if proc:
+                subprocesses.append(proc)
         except Exception as e:
             print(f"Warning: Failed to start web UI: {e}")
 
@@ -811,6 +849,29 @@ def _ui_call(method_name, *args, **kwargs):
     method = getattr(ui_target, method_name, None)
     if callable(method):
         method(*args, **kwargs)
+
+
+def cleanup_subprocesses():
+    print("Cleaning up subprocesses...")
+    for proc in subprocesses:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                proc.terminate()
+        except Exception:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    import time
+    time.sleep(0.1)
+    for proc in subprocesses:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
 
 
 def start_mcp_thread():
@@ -1872,6 +1933,8 @@ def main():
         run_webhook_server()
     except KeyboardInterrupt:
         print("Shutting down backend.")
+    finally:
+        cleanup_subprocesses()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,16 @@
 # OpenDoor
 
-OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locally on your desktop. It integrates a central **Flask API coordinator**, a **FastMCP Server** for dynamic tool execution, and multiple specialized **subprograms** for interacting with the AI via terminal, web, voice, or WhatsApp.
+OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locally on your desktop. It integrates a central **Flask API coordinator**, a **FastMCP Server** for dynamic tool execution, and multiple specialized **subprograms** for interacting with the AI via terminal, web, or WhatsApp.
+
+<p align="center">
+  <a href="https://github.com/greenollie/OpenDoor/commits/main/">
+    <img src="https://img.shields.io/github/commit-activity/t/greenollie/OpenDoor?label=TOTAL%20COMMITS&color=blue&style=for-the-badge" alt="Total Commits" />
+  </a>
+&nbsp;&nbsp;
+  <a href="https://github.com/greenollie/OpenDoor/commits/main/">
+    <img src="https://img.shields.io/github/last-commit/greenollie/OpenDoor?style=for-the-badge&color=red" alt="Last Commit" />
+  </a>
+</p>
 
 ---
 
@@ -71,7 +81,7 @@ The only files strictly required to start this are `main.py`, `mcp_server.py` an
 - **OpenAI API Key** (set as environment variable `OPENAI_API_KEY`)
 - **Operating system**: Windows 10/11, macOS, or Linux.
 
-### 2. Automated Setup (Recommended)
+### 2. Setup
 
 Run the setup script for your platform in the project root folder. This script automatically creates the Python virtual environment, installs all pip dependencies, and adds the OpenDoor directory to your user PATH so you can run the commands from anywhere:
 
@@ -89,6 +99,14 @@ chmod +x setup-linux-macos.sh
 ```
 
 *Note: After running the setup script, please restart your terminal to apply the PATH changes.*
+
+#### Startup:
+Start OpenDoor and prepare for first startup.
+Run this in your terminal:
+```cmd
+opendoor launch --terminal
+```
+`--terminal` is used to allow for connecting to whatsapp and checking configs.
 
 ---
 

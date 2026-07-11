@@ -10,7 +10,7 @@ else
 fi
 
 if [ "$1" = "launch" ] || [ "$1" = "start" ] || [ "$1" = "run" ] || [ "$1" = "server" ]; then
-    "$PYTHON_EXE" "$ROOT_DIR/main.py"
+    "$PYTHON_EXE" "$ROOT_DIR/main.py" "$@"
 else
     "$PYTHON_EXE" "$CURRENT_DIR/terminal.py" "$@"
 fi

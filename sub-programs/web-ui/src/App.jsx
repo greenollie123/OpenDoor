@@ -4,6 +4,22 @@ import ChatArea from './components/ChatArea';
 import MessageInput from './components/MessageInput';
 import { fetchAgents, loadAgent, fetchUpdates, sendMessage, approveCommand } from './api';
 
+// Helper to get a cookie value by name
+const getCookie = (name) => {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return decodeURIComponent(parts.pop().split(';').shift());
+  return null;
+};
+
+// Helper to set a cookie value
+const setCookie = (name, value, days = 365) => {
+  const date = new Date();
+  date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+  const expires = `; expires=${date.toUTCString()}`;
+  document.cookie = `${name}=${encodeURIComponent(value)}${expires}; path=/; SameSite=Lax`;
+};
+
 function App() {
   const [agents, setAgents] = useState([]);
   const [agentDetails, setAgentDetails] = useState({});
@@ -45,9 +61,15 @@ function App() {
         setAgents(agentsList);
         setAgentDetails(details);
         
-        // Select the initial agent (default to Terry or the first available)
-        const initialAgent = agentsList.includes('Terry') ? 'Terry' : agentsList[0];
+        // Select the initial agent (default to saved cookie, Terry, or the first available)
+        const savedAgent = getCookie('last_selected_agent');
+        const initialAgent = (savedAgent && agentsList.includes(savedAgent))
+          ? savedAgent
+          : (agentsList.includes('Terry') ? 'Terry' : agentsList[0]);
         setCurrentAgent(initialAgent);
+        
+        // Save the selection back to cookie
+        setCookie('last_selected_agent', initialAgent);
         
         setStatus(`Loading ${initialAgent}...`);
         
@@ -169,6 +191,7 @@ function App() {
     
     // Switch UI context immediately since it is cached
     setCurrentAgent(agent);
+    setCookie('last_selected_agent', agent);
     setStatus(`Connecting to ${agent}...`);
     
     // Notify backend

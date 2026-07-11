@@ -22,4 +22,4 @@ REM Run terminal client if not matching launch actions
 goto :eof
 
 :launch_server
-"%PYTHON_EXE%" "%ROOT_DIR%\main.py"
+"%PYTHON_EXE%" "%ROOT_DIR%\main.py" %*

@@ -544,7 +544,7 @@ def change_api_keys():
         if len(current_key) > 8:
             masked_key = current_key[:6] + "..." + current_key[-4:]
         
-        console.print(f"\n[bold #cdd6f4]OpenAI API Key is currently set to: [/bold #cdd6f4][bold #89b4fa]{masked_key}[/bold #89b4fa]")
+        console.print(f"[bold #cdd6f4]OpenAI API Key is currently set to: [/bold #cdd6f4][bold #89b4fa]{masked_key}[/bold #89b4fa]")
         
         change = ask_with_tick(
             questionary.confirm(

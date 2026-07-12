@@ -606,7 +606,7 @@ def main():
     console.print(f"\n[bold #585b70]Locating main configuration files...[/bold #585b70]")
     console.print(f"  Main config path: {CONFIG_FILE}")
     console.print(f"  Main config example: {EXAMPLE_FILE}")
-
+    
     if not CONFIG_FILE.exists():
         console.print(f"[bold #f9e2af]! Main config.yaml not found. Attempting to copy from config.yaml.example...[/bold #f9e2af]")
         if EXAMPLE_FILE.exists():
@@ -624,7 +624,7 @@ def main():
     whatsapp_dir = sub_programs_dirs["whatsapp"][0]
     whatsapp_config_path = whatsapp_dir / "whatsapp_config.yaml"
     whatsapp_example_path = whatsapp_dir / "whatsapp_config.yaml.example"
-
+    
     if status_map["whatsapp"]:
         console.print(f"[bold #585b70]Locating WhatsApp configuration files...[/bold #585b70]")
         console.print(f"  WhatsApp config path: {whatsapp_config_path}")
@@ -642,90 +642,132 @@ def main():
                 console.print(f"[bold #f38ba8]✗ Error: WhatsApp config template (whatsapp_config.yaml.example) is missing![/bold #f38ba8]")
         else:
             console.print(f"[bold #a6e3a1]✓ whatsapp_config.yaml exists.[/bold #a6e3a1]")
-
-    print("")
-    sub_programs_to_download = ask_with_tick(
-        questionary.checkbox(
-            "Select sub-programs to enable/update (will download from GitHub):",
-            choices=["web-ui", "whatsapp", "TUI", "None"],
-            instruction="(Use arrow keys to move, <space> to select, <enter> to confirm)",
-            style=tui_style
-        ),
-        "Select sub-programs to enable/update (will download from GitHub):",
-        answer_formatter=lambda ans: ", ".join(ans) if ans else "None"
-    )
-
-    if "None" in sub_programs_to_download:
-        sub_programs_to_download = []
-        
-    if sub_programs_to_download:
+            
+    # Main Menu Loop
+    while True:
         print("")
-        sub_program_folder = PROJECT_ROOT / "sub-programs"
-        
-        # Clean up the legacy typo folder if it exists
-        legacy_folder = PROJECT_ROOT / "sub-programss"
-        if legacy_folder.exists():
-            try:
-                shutil.rmtree(legacy_folder)
-            except Exception:
-                pass
-                
-        for i in sub_programs_to_download:
-            TARGET_FOLDER = f"sub-programs/{i}"
-            dest_dir = sub_program_folder / i
-            
-            console.print(f"[bold #f9e2af]Downloading sub-program: {i}...[/bold #f9e2af]")
-            download_github_folder(TARGET_FOLDER, dest_dir)
-            console.print(f"[bold #a6e3a1]✓ {i} downloaded/updated successfully.[/bold #a6e3a1]")
-            
-            # Update status map for next loops
-            if i in sub_programs_dirs:
-                status_map[i] = True
-                
-            if i == "web-ui":
-                build_web_ui(dest_dir)
-                
-            print("")
+        action = ask_with_tick(
+            questionary.select(
+                "What would you like to do?",
+                choices=[
+                    "Edit config",
+                    "Change API Keys",
+                    "Install sub-programs",
+                    "Exit"
+                ],
+                style=tui_style
+            ),
+            "What would you like to do?"
+        )
 
-        # If WhatsApp was downloaded, check and copy default config if needed
-        whatsapp_downloaded_now = whatsapp_dir.exists() and (whatsapp_dir / "whatsapp.py").exists()
-        if whatsapp_downloaded_now:
-            if not whatsapp_config_path.exists():
-                if whatsapp_example_path.exists():
-                    try:
-                        shutil.copy(whatsapp_example_path, whatsapp_config_path)
-                        console.print(f"[bold #a6e3a1]✓ Copied default whatsapp_config.yaml for the newly downloaded WhatsApp sub-program.[/bold #a6e3a1]")
-                        print("")
-                    except Exception as e:
-                        console.print(f"[bold #f38ba8]✗ Error copying WhatsApp config: {e}[/bold #f38ba8]")
-                        print("")
-                else:
-                    console.print(f"[bold #f38ba8]✗ Error: WhatsApp config template (whatsapp_config.yaml.example) is missing![/bold #f38ba8]")
-                    print("")
+        if action in ("Cancel", "Exit"):
+            break
 
-            # Prompt if they want to edit the newly downloaded WhatsApp config
-            if not status_map["whatsapp"]:
-                edit_new_whatsapp = ask_with_tick(
-                    questionary.confirm(
-                        "Would you like to configure the newly downloaded WhatsApp gateway now?",
-                        default=True,
+        elif action == "Change API Keys":
+            change_api_keys()
+
+        elif action == "Edit config":
+            while True:
+                print("")
+                # Recalculate whatsapp download status in case they downloaded it in this session
+                whatsapp_downloaded_now = whatsapp_dir.exists() and (whatsapp_dir / "whatsapp.py").exists()
+                
+                edit_choices = ["Main System Config (config.yaml)"]
+                if whatsapp_downloaded_now:
+                    edit_choices.append("WhatsApp Gateway Config (whatsapp_config.yaml)")
+                edit_choices.append("Back")
+
+                choice = ask_with_tick(
+                    questionary.select(
+                        "Select a configuration to edit:",
+                        choices=edit_choices,
                         style=tui_style
                     ),
-                    "Would you like to configure the newly downloaded WhatsApp gateway now?"
+                    "Select a configuration to edit:"
                 )
-                if edit_new_whatsapp:
+
+                if choice == "Back":
+                    break
+                elif choice == "Main System Config (config.yaml)":
+                    edit_main_config()
+                elif choice == "WhatsApp Gateway Config (whatsapp_config.yaml)":
                     edit_whatsapp_config(whatsapp_config_path, whatsapp_example_path)
-                else:
+
+        elif action == "Install sub-programs":
+            sub_programs_to_download = ask_with_tick(
+                questionary.checkbox(
+                    "Select sub-programs to enable/update (will download from GitHub):",
+                    choices=["web-ui", "whatsapp", "TUI", "None"],
+                    instruction="(Use arrow keys to move, <space> to select, <enter> to confirm)",
+                    style=tui_style
+                ),
+                "Select sub-programs to enable/update (will download from GitHub):",
+                answer_formatter=lambda ans: ", ".join(ans) if ans else "None"
+            )
+            
+            if "None" in sub_programs_to_download:
+                sub_programs_to_download = []
+                
+            if sub_programs_to_download:
+                print("")
+                sub_program_folder = PROJECT_ROOT / "sub-programs"
+                
+                # Clean up the legacy typo folder if it exists
+                legacy_folder = PROJECT_ROOT / "sub-programss"
+                if legacy_folder.exists():
+                    try:
+                        shutil.rmtree(legacy_folder)
+                    except Exception:
+                        pass
+                        
+                for i in sub_programs_to_download:
+                    TARGET_FOLDER = f"sub-programs/{i}"
+                    dest_dir = sub_program_folder / i
+                    
+                    console.print(f"[bold #f9e2af]Downloading sub-program: {i}...[/bold #f9e2af]")
+                    download_github_folder(TARGET_FOLDER, dest_dir)
+                    console.print(f"[bold #a6e3a1]✓ {i} downloaded/updated successfully.[/bold #a6e3a1]")
+                    
+                    # Update status map for next loops
+                    if i in sub_programs_dirs:
+                        status_map[i] = True
+                        
+                    if i == "web-ui":
+                        build_web_ui(dest_dir)
+                        
                     print("")
-                status_map["whatsapp"] = True
 
-    edit_main_config()
+                # If WhatsApp was downloaded, check and copy default config if needed
+                whatsapp_downloaded_now = whatsapp_dir.exists() and (whatsapp_dir / "whatsapp.py").exists()
+                if whatsapp_downloaded_now:
+                    if not whatsapp_config_path.exists():
+                        if whatsapp_example_path.exists():
+                            try:
+                                shutil.copy(whatsapp_example_path, whatsapp_config_path)
+                                console.print(f"[bold #a6e3a1]✓ Copied default whatsapp_config.yaml for the newly downloaded WhatsApp sub-program.[/bold #a6e3a1]")
+                                print("")
+                            except Exception as e:
+                                console.print(f"[bold #f38ba8]✗ Error copying WhatsApp config: {e}[/bold #f38ba8]")
+                                print("")
+                        else:
+                            console.print(f"[bold #f38ba8]✗ Error: WhatsApp config template (whatsapp_config.yaml.example) is missing![/bold #f38ba8]")
+                            print("")
 
-    whatsapp_downloaded_now = whatsapp_dir.exists() and (whatsapp_dir / "whatsapp.py").exists()
-    if whatsapp_downloaded_now:
-        edit_whatsapp_config(whatsapp_config_path, whatsapp_example_path)
-
-    change_api_keys()
+                    # Prompt if they want to edit the newly downloaded WhatsApp config
+                    if not status_map["whatsapp"]:
+                        edit_new_whatsapp = ask_with_tick(
+                            questionary.confirm(
+                                "Would you like to configure the newly downloaded WhatsApp gateway now?",
+                                default=True,
+                                style=tui_style
+                            ),
+                            "Would you like to configure the newly downloaded WhatsApp gateway now?"
+                        )
+                        if edit_new_whatsapp:
+                            edit_whatsapp_config(whatsapp_config_path, whatsapp_example_path)
+                        else:
+                            print("")
+                        status_map["whatsapp"] = True
 
     console.print("\n[bold #a6e3a1]Configuration complete! Ready to start OpenDoor.[/bold #a6e3a1]")
 

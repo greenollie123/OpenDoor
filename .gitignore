@@ -67,3 +67,5 @@ master/working/custom-tools/__pycache__
 master/working/custom-tools/data
 
 channels.yaml
+wiki/
+backup/

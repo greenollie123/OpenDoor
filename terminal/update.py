@@ -11,15 +11,30 @@ try:
     import requests
     import yaml
     import questionary
+    import pyfiglet
+    from questionary import Style
     from rich.console import Console
     from rich.panel import Panel
 except ImportError:
     print("Error: Missing required packages.")
     print("Please activate your virtual environment (venv) or install dependencies manually:")
-    print("  pip install requests PyYAML questionary rich")
+    print("  pip install requests PyYAML questionary rich pyfiglet")
     sys.exit(1)
 
 console = Console()
+
+tui_style = Style([
+    ('qmark', 'fg:#89B4FA bold'),       # pink
+    ('question', 'bold fg:#cdd6f4'),    # text
+    ('answer', 'fg:#89b4fa bold'),      # blue
+    ('pointer', 'fg:#89B4FA bold'),     # pink
+    ('highlighted', 'fg:#89B4FA bold'), # pink
+    ('selected', 'fg:#89dceb'),         # sky
+    ('separator', 'fg:#45475a'),        # surface1
+    ('instruction', 'fg:#a6adc8'),      # subtext0
+    ('text', 'fg:#cdd6f4'),             # text
+    ('disabled', 'fg:#313244'),         # surface0
+])
 
 # GitHub Repository Info
 REPO_OWNER = "greenollie"
@@ -36,6 +51,28 @@ else:
 BACKUP_DIR = PROJECT_ROOT / "backup"
 TEMP_DIR = PROJECT_ROOT / "temp_update"
 TEMP_ZIP = PROJECT_ROOT / "update.zip"
+
+def ask_with_tick(question_obj, message, answer_formatter=None):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+    answer = question_obj.unsafe_ask()
+    ans_display = answer_formatter(answer) if answer_formatter else str(answer)
+    sys.stdout.write("\033[A\r\033[K")
+    sys.stdout.flush()
+    
+    is_negative = False
+    if isinstance(answer, bool):
+        is_negative = not answer
+    elif str(answer) in ("Cancel", "Exit", "None", "cancel", "exit"):
+        is_negative = True
+
+    if is_negative:
+        console.print(f"[bold #f38ba8]✗[/bold #f38ba8] [bold #cdd6f4]{message}[/bold #cdd6f4] [#f38ba8]{ans_display}[/#f38ba8]")
+    else:
+        console.print(f"[bold #89B4FA]✓[/bold #89B4FA] [bold #cdd6f4]{message}[/bold #cdd6f4] [#89b4fa]{ans_display}[/#89b4fa]")
+    return answer
 
 def get_timestamp():
     """Generates timestamp in the format dd.mm.yyyy-hh.mm"""
@@ -105,7 +142,14 @@ def create_backup():
     except Exception as e:
         console.print(f"[bold #f38ba8]✗ Backup failed: {e}[/bold #f38ba8]")
         # Ask if user wants to proceed without backup
-        proceed = questionary.confirm("Backup failed. Do you want to proceed with the update anyway?", default=False).ask()
+        proceed = ask_with_tick(
+            questionary.confirm(
+                "Backup failed. Do you want to proceed with the update anyway?",
+                default=False,
+                style=tui_style
+            ),
+            "Backup failed. Do you want to proceed with the update anyway?"
+        )
         if not proceed:
             console.print("[bold #f38ba8]Update aborted by user.[/bold #f38ba8]")
             sys.exit(1)
@@ -507,17 +551,35 @@ def cleanup():
     console.print("[bold #a6e3a1]✓ Cleanup complete.[/bold #a6e3a1]")
 
 def main():
-    console.print(Panel("[bold #89b4fa]OpenDoor Updater[/bold #89b4fa]\nAuto-updating without breaking configurations or deleting custom data.", border_style="#89b4fa"))
+    print("")
+    banner = pyfiglet.figlet_format("OpenDoor", font="ansi_shadow")
+    console.print(f"[bold #89b4fa]{banner}[/bold #89b4fa]")
+    console.print("[bold #89b4fa]OpenDoor update tool[/bold #89b4fa]\n")
+
+    #console.print(
+    #    Panel(
+    #        "Auto-updating without breaking configurations or deleting custom data.", 
+    #        title="[bold]OpenDoor Updater[/bold]", 
+    #        title_align="left", 
+    #        border_style="#89b4fa",
+    #        expand=False
+    #    )
+    #)   
     
     # 1. Ask user for update channel
-    choice = questionary.select(
+    choice = ask_with_tick(
+        questionary.select(
+            "Choose an update channel:",
+            choices=[
+                {"name": "Latest Release (Stable)", "value": "stable"},
+                {"name": "Latest Update (Includes Pre-releases)", "value": "pre-release"},
+                {"name": "Cancel", "value": "cancel"}
+            ],
+            style=tui_style
+        ),
         "Choose an update channel:",
-        choices=[
-            {"name": "Latest Release (Stable)", "value": "stable"},
-            {"name": "Latest Update (Includes Pre-releases)", "value": "pre-release"},
-            {"name": "Cancel", "value": "cancel"}
-        ]
-    ).ask()
+        answer_formatter=lambda ans: "Latest Release (Stable)" if ans == "stable" else "Latest Update (Includes Pre-releases)" if ans == "pre-release" else "Cancel"
+    )
     
     if choice == "cancel" or not choice:
         console.print("[bold #f38ba8]Update cancelled.[/bold #f38ba8]")
@@ -542,7 +604,14 @@ def main():
     console.print(Panel(truncated_body, title="Release Notes excerpt", border_style="#585b70"))
     
     # 3. Confirm with user
-    confirm = questionary.confirm(f"Do you want to download and apply {tag_name}?", default=True).ask()
+    confirm = ask_with_tick(
+        questionary.confirm(
+            f"Do you want to download and apply {tag_name}?",
+            default=True,
+            style=tui_style
+        ),
+        f"Do you want to download and apply {tag_name}?"
+    )
     if not confirm:
         console.print("[bold #f38ba8]Update cancelled.[/bold #f38ba8]")
         return

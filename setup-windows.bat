@@ -51,7 +51,7 @@ echo Please restart your terminal to apply PATH changes.
 echo.
 set /p "RUN_NOW=Would you like to run 'opendoor launch --terminal' now? (Y/n): "
 if /i "%RUN_NOW%"=="y" (
-    call "%DIR%\terminal\opendoor.bat" launch --terminal
+    "%DIR%\terminal\opendoor.bat" launch --terminal
 ) else if "%RUN_NOW%"=="" (
-    call "%DIR%\terminal\opendoor.bat" launch --terminal
+    "%DIR%\terminal\opendoor.bat" launch --terminal
 )

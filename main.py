@@ -846,6 +846,29 @@ def run_in_new_terminal(args, cwd=None):
         return None
 
     if os.name == "nt":
+        # Resolve npm to avoid batch file wrapper and prevent "Terminate batch job" prompt
+        if args and (args[0] == "npm" or args[0] == "npm.cmd"):
+            import shutil
+            npm_path = shutil.which("npm")
+            if npm_path:
+                npm_dir = os.path.dirname(npm_path)
+                for relative_path in [
+                    os.path.join("node_modules", "npm", "bin", "npm-cli.js"),
+                    os.path.join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+                    "npm-cli.js"
+                ]:
+                    cli_js = os.path.abspath(os.path.join(npm_dir, relative_path))
+                    if os.path.exists(cli_js):
+                        node_exe = shutil.which("node") or os.path.join(npm_dir, "node.exe")
+                        if os.path.exists(node_exe):
+                            args = [node_exe, cli_js] + args[1:]
+                            break
+
+        # Fallback wrapper for other batch files to prevent "Terminate batch job" prompt
+        if args and isinstance(args, list) and isinstance(args[0], str) and (args[0].endswith(".bat") or args[0].endswith(".cmd")):
+            cmd_str = " ".join(args)
+            args = ["cmd.exe", "/c", f"{cmd_str} < nul"]
+
         creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         try:
             return subprocess.Popen(args, creationflags=creationflags, cwd=cwd)

@@ -2,11 +2,15 @@
 # WhatsApp Gateway Configuration
 # =================================================================
 
-# ID_ALLOWLIST: A list of authorized WhatsApp IDs allowed to use the AI.
-# You can find IDs by checking the whatsapp terminal after sending a message
+# ID_ALLOWLIST: A list of authorized WhatsApp IDs or phone numbers allowed to use the AI.
+# You can use phone numbers formatted with leading plus signs, spaces, or dashes (e.g., "+1 (555) 019-2834" or "+44 1234 567890").
 ID_ALLOWLIST:
-  - "123456789012345"
-  - "987654321098765"
+  - "+44 1234 5438"
+  - "+1 (555) 019-2834"
+
+# TRIGGER_PREFIX: The prefix a message must start with for the AI to respond (case-insensitive).
+# Set to "" to reply to all messages without requiring a prefix.
+TRIGGER_PREFIX: "to ai:"
 
 # ADDITIONAL_YOU_CHAT_PERMISSIONS: Set to true if you want the bot to reply to your 
 # own messages in self-chats without having to include the prefix at the start of your message.
@@ -21,10 +25,10 @@ SELF_CHAT_AGENT: "Terry"
 # DEFAULT_AGENT: The fallback agent handling incoming chats if not specifically mapped.
 DEFAULT_AGENT: "Terry"
 
-# CONTACT_AGENT_MAPPING: Maps specific contact phone numbers to agent names.
+# AGENT_MAPPING: Maps specific contact phone numbers to agent names.
 # Example:
-# CONTACT_AGENT_MAPPING: {
+# AGENT_MAPPING: {
 #   "44123456789": "Friday"
 #   "1235466788": "Jarvis"
 # }
-CONTACT_AGENT_MAPPING: {}
+AGENT_MAPPING: {}

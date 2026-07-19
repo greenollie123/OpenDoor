@@ -275,6 +275,9 @@ def print_help():
     print("  opendoor ask/tell [agent] [prompt]      Chat to the agent and print the response")
     print("  opendoor accept [agent]                 Approve a pending tool authorization request")
     print("  opendoor deny [agent]                   Deny a pending tool authorization request")
+    print("  opendoor setup                          Run the initial setup wizard")
+    print("  opendoor configure/config               Run the configuration wizard")
+    print("  opendoor update                         Check for updates")
     
 def main():
     arguments = sys.argv[1:]

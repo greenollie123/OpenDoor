@@ -122,6 +122,8 @@ At the end of the platform setup script, the interactive wizard will launch in t
 opendoor setup
 # OR
 opendoor configure
+# OR
+opendoor config
 ```
 
 In the configuration wizard, you can:

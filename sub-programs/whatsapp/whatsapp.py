@@ -7,6 +7,7 @@ import re
 import subprocess
 import requests  
 import yaml      
+import sqlite3
 from neonize.client import NewClient
 from neonize.events import MessageEv
 
@@ -86,19 +87,111 @@ def load_config():
         "REPLY_PREFIX": "\n{AI_NAME}:\n\n",
         "SELF_CHAT_AGENT": "Terry",
         "DEFAULT_AGENT": "Terry",
-        "CONTACT_AGENT_MAPPING": {}
+        "AGENT_MAPPING": {},
+        "TRIGGER_PREFIX": "to ai:"
     }
 
+    # Automatically migrate legacy CONTACT_AGENT_MAPPING to AGENT_MAPPING
+    if isinstance(loaded_config, dict):
+        if "CONTACT_AGENT_MAPPING" in loaded_config:
+            if "AGENT_MAPPING" not in loaded_config:
+                loaded_config["AGENT_MAPPING"] = loaded_config.pop("CONTACT_AGENT_MAPPING")
+            else:
+                loaded_config.pop("CONTACT_AGENT_MAPPING", None)
+
     return {**defaults, **loaded_config}
+
+def normalize_phone_number(val) -> str:
+    """Normalizes a phone number or WhatsApp ID by extracting only its digits."""
+    if val is None:
+        return ""
+    val_str = str(val).strip()
+    if "@" in val_str:
+        val_str = val_str.split("@")[0].split(":")[0]
+    return re.sub(r"\D", "", val_str)
+
+def jid_to_str(jid_obj) -> str:
+    """Converts a neonize JID protobuf object into a clean standard WhatsApp JID string."""
+    if jid_obj is None:
+        return ""
+    user = getattr(jid_obj, "User", None) or getattr(jid_obj, "user", None) or ""
+    server = getattr(jid_obj, "Server", None) or getattr(jid_obj, "server", None) or ""
+    device = getattr(jid_obj, "Device", 0) or getattr(jid_obj, "device", 0) or 0
+    
+    if not user:
+        return str(jid_obj)
+        
+    res = str(user)
+    if device:
+        res += f":{device}"
+    if server:
+        res += f"@{server}"
+    return res
+
+def db_get_pn_from_lid(lid_val: str) -> str:
+    """Queries the local sqlite database to resolve a phone number from an LID."""
+    if not lid_val:
+        return ""
+    lid_clean = lid_val.split("@")[0].split(":")[0]
+    db_path = os.path.join(Path(__file__).resolve().parent, "whatsapp_session.db")
+    if not os.path.exists(db_path):
+        return ""
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        cursor = conn.cursor()
+        cursor.execute("SELECT pn FROM whatsmeow_lid_map WHERE lid = ?;", (lid_clean,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return str(row[0])
+    except Exception as e:
+        print(f" -> [DEBUG] Database LID resolution error: {e}")
+    return ""
+
+def safe_send_message(client, resolved_jid, message, **kwargs):
+    """Sends a message using client.send_message, catching wire format parsing errors since they still deliver successfully."""
+    try:
+        return client.send_message(resolved_jid, message, **kwargs)
+    except Exception as e:
+        err_msg = str(e)
+        if "Wire format was corrupt" in err_msg or "Error parsing message" in err_msg:
+            # print(" -> [Info] Message sent successfully (ignored neonize return-value parsing error).")
+            return None
+        raise e
 
 # Load and validate configuration safely
 config = load_config()
 
 if VALID_CONFIG and config is not None:
-    ALLOWLIST = config["ID_ALLOWLIST"]
+    ALLOWLIST = [normalize_phone_number(item) for item in config.get("ID_ALLOWLIST", []) if item]
     ALLOW_OWN_MESSAGES = config["ADDITIONAL_YOU_CHAT_PERMISSIONS"]
     
     client = NewClient(os.path.join(Path(__file__).resolve().parent, "whatsapp_session.db"))
+
+    @client.qr
+    def on_qr(client, data_qr: bytes):
+        qr_path = os.path.join(Path(__file__).resolve().parent, "whatsapp_qr.png")
+        qr_txt_path = os.path.join(Path(__file__).resolve().parent, "whatsapp_qr.txt")
+        try:
+            with open(qr_txt_path, "wb") as f_txt:
+                f_txt.write(data_qr)
+        except Exception as e:
+            print(f"[-] Error saving QR text: {e}")
+        try:
+            import segno
+            qr = segno.make_qr(data_qr)
+            qr.save(qr_path, scale=5)
+            print(f"\n[!] QR Code received! Saved to image: {qr_path}")
+            print("[!] Please open this image and scan it with your phone's WhatsApp Linked Devices.")
+            try:
+                qr.terminal(compact=True)
+            except Exception:
+                try:
+                    qr.terminal(compact=False)
+                except Exception:
+                    print("[!] (Terminal print skipped due to encoding limits. Please use the saved PNG.)")
+        except Exception as e:
+            print(f"[-] Error displaying/saving QR code: {e}")
 
     # Global tracking variables
     my_personal_jid = None
@@ -244,19 +337,78 @@ if VALID_CONFIG and config is not None:
                 sender_jid = getattr(src, "sender", None)
 
         # Resolve true interacting ID
-        sender_id = extract_user_id(sender_jid or chat_target)
+        interacting_jid = sender_jid or chat_target
+        sender_phone = ""
+        resolved_phone_jid = None
+        
+        is_lid = False
+        if interacting_jid:
+            server = getattr(interacting_jid, "Server", "") or getattr(interacting_jid, "server", "") or ""
+            if server == "lid":
+                is_lid = True
+                
+        if is_lid:
+            raw_lid = extract_user_id(interacting_jid)
+            # Try database lookup (avoids neonize protobuf wire format corrupt bug)
+            sender_phone = db_get_pn_from_lid(raw_lid)
+            if sender_phone:
+                from neonize.utils import build_jid
+                resolved_phone_jid = build_jid(sender_phone, "s.whatsapp.net")
+            else:
+                print(f" -> [DEBUG] Attempting to resolve LID {jid_to_str(interacting_jid)} using get_pn_from_lid...")
+                try:
+                    resolved_phone_jid = client.get_pn_from_lid(interacting_jid)
+                    if resolved_phone_jid:
+                        sender_phone = extract_user_id(resolved_phone_jid)
+                        print(f" -> [DEBUG] Resolved JID successfully: {jid_to_str(resolved_phone_jid)}")
+                except Exception as e:
+                    print(f" -> [DEBUG] get_pn_from_lid raised: {e}")
+                
+                if not resolved_phone_jid:
+                    print(f" -> [DEBUG] Attempting fallback resolution using get_user_info...")
+                    try:
+                        res_info = client.get_user_info(interacting_jid)
+                        if res_info:
+                            for single_info in res_info:
+                                ret_jid = getattr(single_info, "JID", None) or getattr(single_info, "jid", None)
+                                if ret_jid and (getattr(ret_jid, "Server", "") or getattr(ret_jid, "server", "")) == "s.whatsapp.net":
+                                    resolved_phone_jid = ret_jid
+                                    sender_phone = extract_user_id(resolved_phone_jid)
+                                    print(f" -> [DEBUG] Resolved JID from get_user_info: {jid_to_str(resolved_phone_jid)}")
+                                    break
+                    except Exception as ex:
+                        print(f" -> [DEBUG] get_user_info raised: {ex}")
+
+        sender_id = extract_user_id(interacting_jid)
         chat_id = extract_user_id(chat_target)
 
         # Identify if this is a self-chat notebook window
         is_self_chat = (sender_id == chat_id) or (chat_target and not sender_jid)
+
+        # Log incoming event with sender phone number / ID
+        print(f"\n--- [WhatsApp Event] Received Message ---")
+        if sender_phone:
+            print(f" -> Sender Phone:    {sender_phone}")
+        print(f" -> Sender ID/LID:   {sender_id}")
+        print(f" -> Full Sender JID: {jid_to_str(interacting_jid)}")
+        if resolved_phone_jid:
+            print(f" -> Resolved JID:    {jid_to_str(resolved_phone_jid)}")
+        print(f" -> Is From Me:      {is_from_me}")
+        print(f" -> Is Self Chat:    {is_self_chat}")
 
         default_agent = config.get("DEFAULT_AGENT", "Terry")
         routed_agent = default_agent
         if is_self_chat:
             routed_agent = config.get("SELF_CHAT_AGENT", default_agent)
         else:
-            mapping = config.get("CONTACT_AGENT_MAPPING", {})
-            routed_agent = mapping.get(sender_id, default_agent)
+            mapping = config.get("AGENT_MAPPING", {})
+            normalized_mapping = {normalize_phone_number(k): v for k, v in mapping.items()}
+            normalized_sender_phone = normalize_phone_number(sender_phone) if sender_phone else ""
+            normalized_sender_id = normalize_phone_number(sender_id)
+            routed_agent = (
+                normalized_mapping.get(normalized_sender_phone, None)
+                or normalized_mapping.get(normalized_sender_id, default_agent)
+            )
 
         is_authorized = False
         requires_prefix = True
@@ -264,6 +416,8 @@ if VALID_CONFIG and config is not None:
         # -----------------------------------------------------------------
         # Dynamic Authorization & Prefix Checking Rules
         # -----------------------------------------------------------------
+        normalized_sender_id = normalize_phone_number(sender_id)
+        normalized_sender_phone = normalize_phone_number(sender_phone) if sender_phone else ""
         if is_from_me:
             if is_self_chat:
                 if ALLOW_OWN_MESSAGES:
@@ -271,15 +425,17 @@ if VALID_CONFIG and config is not None:
                     requires_prefix = False
                     my_personal_jid = chat_target
             else:
-                if sender_id in ALLOWLIST:
+                if normalized_sender_id in ALLOWLIST or (normalized_sender_phone and normalized_sender_phone in ALLOWLIST):
                     is_authorized = True
                     requires_prefix = True
         else:
-            if sender_id in ALLOWLIST:
+            if normalized_sender_id in ALLOWLIST or (normalized_sender_phone and normalized_sender_phone in ALLOWLIST):
                 is_authorized = True
                 requires_prefix = True
 
         if not is_authorized:
+            dropped_info = sender_phone if sender_phone else sender_id
+            print(f" -> [UNAUTHORIZED] Message from {dropped_info} dropped (not in ID_ALLOWLIST).")
             return
 
         is_audio_interaction = bool(audio_msg)
@@ -292,10 +448,15 @@ if VALID_CONFIG and config is not None:
         if doc_msg and not temp_message_text:
             temp_message_text = getattr(doc_msg, "caption", "") or f"[Document: {getattr(doc_msg, 'fileName', 'file')}]"
             
-        has_prefix = temp_message_text.lower().startswith("to ai:")
+        trigger_prefix = str(config.get("TRIGGER_PREFIX", "to ai:")).strip().lower()
+        has_prefix = False
         cleaned_text = temp_message_text
-        if has_prefix:
-            cleaned_text = temp_message_text[6:].lstrip()
+        if trigger_prefix:
+            has_prefix = temp_message_text.lower().startswith(trigger_prefix)
+            if has_prefix:
+                cleaned_text = temp_message_text[len(trigger_prefix):].lstrip()
+        else:
+            has_prefix = True
 
         # Intercept `/agent <name>` command if sender has permission
         if cleaned_text.lower().startswith("/agent "):
@@ -305,9 +466,9 @@ if VALID_CONFIG and config is not None:
                 if is_self_chat:
                     config["SELF_CHAT_AGENT"] = new_agent
                 else:
-                    if "CONTACT_AGENT_MAPPING" not in config:
-                        config["CONTACT_AGENT_MAPPING"] = {}
-                    config["CONTACT_AGENT_MAPPING"][sender_id] = new_agent
+                    if "AGENT_MAPPING" not in config:
+                        config["AGENT_MAPPING"] = {}
+                    config["AGENT_MAPPING"][sender_id] = new_agent
                 
                 try:
                     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -319,12 +480,13 @@ if VALID_CONFIG and config is not None:
                 resolved_jid = jid_cache.get(sender_id) or sender_jid or chat_target
                 if not resolved_jid:
                     resolved_jid = f"{sender_id}@s.whatsapp.net"
-                client.send_message(resolved_jid, reply_msg)
+                safe_send_message(client, resolved_jid, reply_msg)
                 print(f" -> [Command Intercepted] Switched agent for {sender_id} to {new_agent}")
                 return
 
         if requires_prefix and not has_prefix and not is_audio_interaction and not is_media_interaction:
-            print(f" -> [Dropped] Message from {sender_id} to {chat_id} is missing 'To AI:' prefix.")
+            prefix_display = trigger_prefix if trigger_prefix else "no prefix"
+            print(f" -> [Dropped] Message from {sender_id} to {chat_id} is missing '{prefix_display}' prefix.")
             return
 
         # -----------------------------------------------------------------
@@ -396,8 +558,8 @@ if VALID_CONFIG and config is not None:
             return
             
         # Re-apply prefix removal for audio/image captions if they had it
-        if has_prefix and message_text.lower().startswith("to ai:"):
-            message_text = message_text[6:].lstrip()
+        if trigger_prefix and has_prefix and message_text.lower().startswith(trigger_prefix):
+            message_text = message_text[len(trigger_prefix):].lstrip()
 
         # -----------------------------------------------------------------
         # Immediate Global Logging (Shows for all intercepted texts)
@@ -411,6 +573,8 @@ if VALID_CONFIG and config is not None:
         print(f" -> [MATCH SUCCESS] Message authorized from {sender_id}! Routing via Webhook for agent '{routed_agent}'...")
         
         jid_cache[sender_id] = chat_target
+        if sender_phone:
+            jid_cache[sender_phone] = chat_target
         
         protocol = {}
         channels_file = os.path.join(MAIN_DIR, "channels.yaml")
@@ -479,7 +643,7 @@ if VALID_CONFIG and config is not None:
                             )
                             audio_message.audioMessage.mimetype = "audio/ogg; codecs=opus"
                             print(f" -> [Sending Reply] Blasting voice note back to: {resolved_jid}")
-                            client.send_message(resolved_jid, audio_message)
+                            safe_send_message(client, resolved_jid, audio_message)
 
                             # Cleanup execution footprints safely
                             try:
@@ -502,7 +666,7 @@ if VALID_CONFIG and config is not None:
                             full_reply = re.sub(r'\*+', '*', full_reply)
                             
                             if ai_reply_clean:
-                                client.send_message(resolved_jid, full_reply)
+                                safe_send_message(client, resolved_jid, full_reply)
                                 
                             import mimetypes
                             for fpath in files_to_send:
@@ -572,9 +736,17 @@ if VALID_CONFIG and config is not None:
                         selectable_count=VoteType.SINGLE
                     )
                     
-                    res = client.send_message(resolved_jid, poll_message, add_msg_secret=True)
-                    active_approvals[res.ID] = approval_id
-                    print(f"[*] Sent approval poll for command ID {approval_id} to WhatsApp.")
+                    try:
+                        res = client.send_message(resolved_jid, poll_message, add_msg_secret=True)
+                        if res and hasattr(res, "ID"):
+                            active_approvals[res.ID] = approval_id
+                        print(f"[*] Sent approval poll for command ID {approval_id} to WhatsApp.")
+                    except Exception as poll_err:
+                        err_msg = str(poll_err)
+                        if "Wire format was corrupt" in err_msg or "Error parsing message" in err_msg:
+                            print(f"[*] Sent approval poll for command ID {approval_id} (ignored neonize parsing error).")
+                        else:
+                            raise poll_err
                     return jsonify({"status": "success"})
                 except Exception as e:
                     print(f"[-] Error sending WhatsApp approval poll: {e}")
@@ -601,7 +773,7 @@ if VALID_CONFIG and config is not None:
                             resolved_jid = build_jid(chat_id)
                             
                     formatted_text = text.replace("**", "*")
-                    client.send_message(resolved_jid, formatted_text)
+                    safe_send_message(client, resolved_jid, formatted_text)
                     return jsonify({"status": "success"})
                 except Exception as e:
                     print(f"[-] Error sending WhatsApp async message: {e}")

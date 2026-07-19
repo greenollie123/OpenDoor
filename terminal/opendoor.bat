@@ -14,6 +14,7 @@ if exist "%ROOT_DIR%\venv\Scripts\python.exe" (
 set "ACTION=%~1"
 if "%ACTION%"=="setup" goto :run_setup
 if "%ACTION%"=="configure" goto :run_config
+if "%ACTION%"=="config" goto :run_config
 if "%ACTION%"=="update" goto :run_update
 if "%ACTION%"=="launch" goto :launch_server
 if "%ACTION%"=="start" goto :launch_server

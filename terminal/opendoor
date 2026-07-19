@@ -11,7 +11,7 @@ fi
 
 if [ "$1" = "setup" ]; then
     "$PYTHON_EXE" "$CURRENT_DIR/setup.py" "$@"
-elif [ "$1" = "configure" ]; then
+elif [ "$1" = "configure" ] || [ "$1" = "config" ]; then
     "$PYTHON_EXE" "$CURRENT_DIR/config.py" "$@"
 elif [ "$1" = "update" ]; then
     "$PYTHON_EXE" "$CURRENT_DIR/update.py" "$@"

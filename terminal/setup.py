@@ -1136,11 +1136,12 @@ def edit_whatsapp_config(config_path, example_path):
 def build_web_ui(web_ui_dir):
     console.print(f"\n[bold #f9e2af]Building web-ui...[/bold #f9e2af]")
     try:
+        use_shell = sys.platform == "win32"
         console.print("[bold #585b70]Running npm install...[/bold #585b70]")
-        subprocess.run(["npm", "install"], cwd=web_ui_dir, shell=True, check=True)
+        subprocess.run(["npm", "install"], cwd=web_ui_dir, shell=use_shell, check=True)
         
         console.print("[bold #585b70]Running npm run build...[/bold #585b70]")
-        subprocess.run(["npm", "run", "build"], cwd=web_ui_dir, shell=True, check=True)
+        subprocess.run(["npm", "run", "build"], cwd=web_ui_dir, shell=use_shell, check=True)
         
         console.print("[bold #a6e3a1]✓ web-ui built successfully.[/bold #a6e3a1]")
     except subprocess.CalledProcessError as e:

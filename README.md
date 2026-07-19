@@ -78,8 +78,6 @@ The only files strictly required to start this are `main.py`, `mcp_server.py` an
 │   └── weather.py
 ├── terminal/                  # Terminal Client & Shortcuts
 │   ├── terminal.py            # Terminal Client Core
-│   ├── opendoor               # Launcher script for Linux/macOS
-│   └── opendoor.bat           # Launcher script for Windows
 └── sub-programs/
     ├── TUI/                   # Textual Terminal UI
     │   └── TUI.py
@@ -96,7 +94,7 @@ The only files strictly required to start this are `main.py`, `mcp_server.py` an
 
 - **Python 3.10 to 3.12**
 - **Node.js 18+** (for the Web UI)
-- **OpenAI API Key** (set as environment variable `OPENAI_API_KEY`)
+- **OpenAI API Key**
 - **Operating system**: Windows 10/11, macOS, or Linux.
 
 ### 2. Setup
@@ -120,14 +118,10 @@ chmod +x setup-linux-macos.sh
 At the end of the platform setup script, the interactive wizard will launch in the same terminal window. You can also re-run it at any time using:
 ```bash
 opendoor setup
-# OR
-opendoor configure
-# OR
-opendoor config
 ```
 
 In the configuration wizard, you can:
-- Configure default AI models and hyper-local weather tool geolocation.
+- Configure default AI models and location.
 - Check download status, install, or update sub-programs (`web-ui`, `whatsapp`, `TUI`).
 - Automatically install dependencies and build the `web-ui` (`npm install` & `npm run build`) upon download.
 
@@ -162,5 +156,4 @@ opendoor ask Terry "what is the weather today?"
 
 ### 🚀 In the future:
 - Voice chat
-- Maybe discord
-- Sub-agents showing on web gui side bit ✅
+- LiteLLM

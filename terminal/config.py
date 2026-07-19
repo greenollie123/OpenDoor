@@ -300,7 +300,6 @@ def edit_main_config():
         "gpt-5.6-luna",
         "gpt-5.5-pro",
         "gpt-5.5",
-        "gpt-5.5-pro",
         "gpt-5.4-pro",
         "gpt-5.4",
         "gpt-5.4-mini",
@@ -310,10 +309,8 @@ def edit_main_config():
     
     main_choices = MODEL_CHOICES.copy()
     if default_main not in main_choices:
-        main_choices.insert(0, default_main)
-    else:
-        main_choices.remove(default_main)
-        main_choices.insert(0, default_main)
+        custom_index = main_choices.index("Custom (Enter manually)")
+        main_choices.insert(custom_index, default_main)
 
     selected_main = ask_with_tick(
         questionary.select(
@@ -336,10 +333,8 @@ def edit_main_config():
     # 2. Subagent Model Selection
     sub_choices = MODEL_CHOICES.copy()
     if default_sub not in sub_choices:
-        sub_choices.insert(0, default_sub)
-    else:
-        sub_choices.remove(default_sub)
-        sub_choices.insert(0, default_sub)
+        custom_index = sub_choices.index("Custom (Enter manually)")
+        sub_choices.insert(custom_index, default_sub)
 
     selected_sub = ask_with_tick(
         questionary.select(

@@ -270,15 +270,74 @@ def run_interactive_session(agent_list):
 def print_help():
     print("OpenDoor CLI")
     print("\nUsage:")
-    print("  opendoor launch/start/run/server        Start the server")
+    print("  opendoor launch/start/run/server        Start the server in the background")
+    print("                                          (use --terminal to keep in foreground)")
+    print("  opendoor stop                           Stop the background server and all subprograms")
     print("  opendoor chat                           Start interactive terminal chat")
     print("  opendoor ask/tell [agent] [prompt]      Chat to the agent and print the response")
-    print("  opendoor accept [agent]                 Approve a pending tool authorization request")
-    print("  opendoor deny [agent]                   Deny a pending tool authorization request")
     print("  opendoor setup                          Run the initial setup wizard")
     print("  opendoor configure/config               Run the configuration wizard")
     print("  opendoor update                         Check for updates")
     
+def stop_server():
+    import urllib.request
+    import json
+    import subprocess
+    
+    print("[*] Attempting to stop OpenDoor server...")
+    stopped = False
+    
+    # 1. Try sending a stop request to the running coordinator server
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:5050/api/stop",
+            method="POST",
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            print(f"[+] Server response: {data.get('message', 'Stopping...')}")
+            stopped = True
+    except Exception:
+        # Server might be offline or hung
+        pass
+
+    # 2. Check and clean up PID file
+    pid_file = os.path.join(MAIN_DIR, "opendoor.pid")
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, "r") as f:
+                pid = int(f.read().strip())
+            
+            if pid > 0:
+                print(f"[*] Found PID file with PID {pid}. Terminating process...")
+                if os.name == "nt":
+                    # taskkill /F /T terminates the process and its children
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    try:
+                        os.killpg(os.getpgid(pid), 15)
+                    except Exception:
+                        try:
+                            os.kill(pid, 15)
+                        except Exception:
+                            pass
+                print(f"[+] Terminated process {pid}.")
+                stopped = True
+        except Exception as e:
+            print(f"[-] Error while killing process from PID file: {e}")
+        finally:
+            if os.path.exists(pid_file):
+                try:
+                    os.remove(pid_file)
+                except Exception:
+                    pass
+                    
+    if stopped:
+        print("[+] OpenDoor stopped successfully.")
+    else:
+        print("[-] OpenDoor is not running.")
+
 def main():
     arguments = sys.argv[1:]
     
@@ -290,6 +349,10 @@ def main():
 
     if action in ["help", "--help", "-h"]:
         print_help()
+        return
+
+    if action == "stop":
+        stop_server()
         return
 
     if action == "chat":

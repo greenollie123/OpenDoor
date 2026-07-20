@@ -71,3 +71,7 @@ wiki/
 backup/
 
 sub-programs/voice
+
+models.yaml
+sub-programs/whatsapp/whatsapp.log
+opendoor.log

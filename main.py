@@ -6,6 +6,7 @@ import glob
 import datetime
 from datetime import datetime
 from openai import OpenAI
+import litellm
 import subprocess
 import threading
 import logging
@@ -22,6 +23,17 @@ from mcp.client.stdio import stdio_client
 
 ROOT_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = os.path.join(ROOT_DIR, "config.yaml")
+MODELS_FILE = os.path.join(ROOT_DIR, "models.yaml")
+models_config = {}
+
+def load_models_config():
+    global models_config
+    if os.path.exists(MODELS_FILE):
+        try:
+            with open(MODELS_FILE, "r", encoding="utf-8") as f:
+                models_config = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"Error loading models.yaml: {e}")
 
 # Global Configuration & State Management
 config = {}
@@ -275,7 +287,7 @@ def load_config():
             
         print("\n" + "="*60)
         print(f" ACTION REQUIRED: Please open and edit '{os.path.basename(CONFIG_FILE)}' now.")
-        print(" Set your LATITUDE, LONGITUDE, and DEFAULT_MODEL.")
+        print(" Set your LATITUDE and LONGITUDE.")
         print("="*60)
         print("\nPress ENTER when you are done editing to continue...")
         input()
@@ -289,7 +301,7 @@ def load_config():
         input()
         sys.exit(0)
 
-    required_keys = ["LATITUDE", "LONGITUDE", "DEFAULT_MODEL"]
+    required_keys = ["LATITUDE", "LONGITUDE"]
     missing_keys = [key for key in required_keys if key not in loaded_config]
 
     if missing_keys:
@@ -649,7 +661,7 @@ def create_agent():
     
     config_file = os.path.join(agent_working_dir, "config.yaml")
     agent_config = {
-        "AI_MODEL": config.get("DEFAULT_MODEL", "gpt-5.4-nano"),
+        "AI_MODEL": models_config.get("DEFAULT_MODEL", {}).get("model", "gpt-5.4-nano"),
         "AI_NAME": agent_display_name,
     }
     with open(config_file, "w", encoding="utf-8") as f:
@@ -860,6 +872,28 @@ def get_tool_execution(tool_call_id):
             return jsonify({"status": "error", "message": "Tool execution not found"}), 404
 
 
+@webhook_app.route('/api/stop', methods=['POST'])
+def stop_server():
+    def shutdown():
+        import time
+        time.sleep(0.5)
+        cleanup_subprocesses()
+        pid_file = os.path.join(ROOT_DIR, "opendoor.pid")
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, "r") as f:
+                    current_pid_in_file = int(f.read().strip())
+                if current_pid_in_file == os.getpid():
+                    os.remove(pid_file)
+            except Exception:
+                pass
+        print("[*] OpenDoor backend stopped.")
+        os._exit(0)
+    
+    threading.Thread(target=shutdown).start()
+    return jsonify({"status": "stopping", "message": "OpenDoor backend is shutting down..."})
+
+
 
 def run_in_new_terminal(args, cwd=None):
     if isinstance(args, str):
@@ -1055,7 +1089,7 @@ def start_mcp_thread():
         global mcp_session, mcp_client_context
         server_params = StdioServerParameters(
             command=sys.executable,
-            args=[str(ROOT_DIR / "mcp_server.py")],
+            args=[os.path.join(ROOT_DIR, "mcp_server.py")],
             env=os.environ.copy()
         )
         while True:
@@ -1159,10 +1193,34 @@ def call_mcp_tool(name: str, arguments: dict, agent_name: str = "Terry"):
 
 def get_embedding(text: str) -> list:
     try:
-        response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=[text]
-        )
+        # Check if an EMBEDDING_MODEL is explicitly configured in models.yaml
+        embed_info = models_config.get("EMBEDDING_MODEL")
+        if embed_info:
+            model_name = embed_info.get("model", "text-embedding-3-small")
+            api_key = embed_info.get("api_key")
+            api_base = embed_info.get("api_base")
+        else:
+            # Fallback to DEFAULT_MODEL credentials if it's an OpenAI model or if environment key exists
+            default_info = models_config.get("DEFAULT_MODEL", {})
+            model_name = "text-embedding-3-small"
+            default_model_name = default_info.get("model", "")
+            api_key = None
+            if "gpt" in default_model_name.lower() or "o1-" in default_model_name.lower() or "o3-" in default_model_name.lower():
+                api_key = default_info.get("api_key")
+            if not api_key:
+                api_key = os.environ.get("OPENAI_API_KEY")
+            api_base = default_info.get("api_base") or os.environ.get("OPENAI_API_BASE")
+
+        params = {
+            "model": model_name,
+            "input": [text]
+        }
+        if api_key:
+            params["api_key"] = api_key
+        if api_base:
+            params["api_base"] = api_base
+
+        response = litellm.embedding(**params)
         return response.data[0].embedding
     except Exception:
         return []
@@ -1395,22 +1453,35 @@ def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reaso
     messages = [subagent_system, {"role": "user", "content": f"YOUR ASSIGNED TASK:\n{task_description}"}]
     while steps < max_steps:
         try:
-            subagent_model = config.get("SUBAGENT_MODEL")
-            if not subagent_model:
-                agent_info = get_agent_info(agent_name)
-                subagent_model = agent_info.get("AI_MODEL", config.get("DEFAULT_MODEL", "gpt-5.4-nano"))
+            # Resolve credentials and model from models.yaml
+            model_info = models_config.get("SUBAGENT_MODEL", {})
+            default_model = models_config.get("DEFAULT_MODEL", {}).get("model", "gpt-5.4-nano")
+            agent_info = get_agent_info(agent_name)
+            fallback_subagent_model = agent_info.get("AI_MODEL", default_model)
+
+            model_name = model_info.get("model", fallback_subagent_model)
+            api_key = model_info.get("api_key")
+            api_base = model_info.get("api_base")
 
             api_params = {
-                "model": subagent_model,
+                "model": model_name,
                 "messages": messages,
                 "tools": subagent_tools,
                 "tool_choice": "auto"
             }
+            if api_key:
+                api_params["api_key"] = api_key
+            if api_base:
+                api_params["api_base"] = api_base
 
             is_non_reasoning_model = (
-                "gpt-4" in subagent_model or
-                "gpt-3" in subagent_model or
-                "davinci" in subagent_model
+                "gpt-4" in model_name or
+                "gpt-3" in model_name or
+                "davinci" in model_name or
+                "gemini" in model_name or
+                "claude" in model_name or
+                "groq" in model_name or
+                "ollama" in model_name
             )
             if not is_non_reasoning_model:
                 api_params["max_completion_tokens"] = 4000
@@ -1420,7 +1491,7 @@ def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reaso
                 api_params["max_tokens"] = 4000
 
             try:
-                response = client.chat.completions.create(**api_params)
+                response = litellm.completion(**api_params)
             except Exception as api_err:
                 err_str = str(api_err).lower()
                 if "reasoning_effort" in err_str or "max_completion_tokens" in err_str or "unsupported parameter" in err_str or "extra parameters" in err_str or "unexpected keyword" in err_str:
@@ -1428,7 +1499,7 @@ def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reaso
                     if "max_completion_tokens" in err_str or "max_completion_tokens" not in api_params:
                         api_params.pop("max_completion_tokens", None)
                         api_params["max_tokens"] = 4000
-                    response = client.chat.completions.create(**api_params)
+                    response = litellm.completion(**api_params)
                 else:
                     raise api_err
         except Exception as e:
@@ -1736,7 +1807,7 @@ def get_agent_info(agent_name: str) -> dict:
     agent_working_dir = os.path.join(AI_WORKSPACE_DIR, "agents", agent_name)
     agent_config_file = os.path.join(agent_working_dir, "config.yaml")
     info = {
-        "AI_MODEL": config.get("DEFAULT_MODEL", "gpt-5.4-nano"),
+        "AI_MODEL": models_config.get("DEFAULT_MODEL", {}).get("model", "gpt-5.4-nano"),
         "AI_NAME": agent_name,
     }
     if os.path.exists(agent_config_file):
@@ -1933,7 +2004,23 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
                 api_payload.append(clean_m)
         try:
             agent_tool_schemas = update_and_get_agent_tools(agent_name)
-            response = client.chat.completions.create(model=agent_model, messages=api_payload, tools=agent_tool_schemas, tool_choice="auto")
+            model_info = models_config.get("DEFAULT_MODEL", {})
+            model_name = model_info.get("model", agent_model)
+            api_key = model_info.get("api_key")
+            api_base = model_info.get("api_base")
+
+            completion_kwargs = {
+                "model": model_name,
+                "messages": api_payload,
+                "tools": agent_tool_schemas,
+                "tool_choice": "auto"
+            }
+            if api_key:
+                completion_kwargs["api_key"] = api_key
+            if api_base:
+                completion_kwargs["api_base"] = api_base
+
+            response = litellm.completion(**completion_kwargs)
         except Exception as api_err:
             err_msg = f"[API Error]: {str(api_err)}"
             add_ui_update("system", context_channel, err_msg, agent_name)
@@ -2020,6 +2107,22 @@ def init_backend():
     global config, client
 
     config = load_config()
+    load_models_config()
+
+    # Automatically propagate API keys from models.yaml to environment variables so that
+    # subprocesses (like whatsapp.py or mcp_server.py) and libraries can auto-detect them.
+    for model_key in ["DEFAULT_MODEL", "SUBAGENT_MODEL", "EMBEDDING_MODEL"]:
+        m_info = models_config.get(model_key, {})
+        m_name = m_info.get("model", "")
+        m_key = m_info.get("api_key", "")
+        if m_key:
+            if "gemini" in m_name.lower():
+                os.environ.setdefault("GEMINI_API_KEY", m_key)
+            elif "claude" in m_name.lower() or "anthropic" in m_name.lower():
+                os.environ.setdefault("ANTHROPIC_API_KEY", m_key)
+            elif "gpt-" in m_name.lower() or "o1-" in m_name.lower() or "o3-" in m_name.lower() or "text-embedding" in m_name.lower():
+                os.environ.setdefault("OPENAI_API_KEY", m_key)
+
     api_key = config.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
     client = OpenAI(api_key=api_key) if api_key else None
 
@@ -2106,7 +2209,7 @@ To create tools, read `custom-tools/CUSTOM_TOOLS_CREATION_TUTORIAL.md` first.
         config_file = os.path.join(agent_working_path, "config.yaml")
         if not os.path.exists(config_file):
             agent_config = {
-                "AI_MODEL": config.get("DEFAULT_MODEL", "gpt-5.4-nano"),
+                "AI_MODEL": models_config.get("DEFAULT_MODEL", {}).get("model", "gpt-5.4-nano"),
                 "AI_NAME": agent_dir,
             }
             with open(config_file, "w", encoding="utf-8") as f:
@@ -2163,8 +2266,115 @@ To create tools, read `custom-tools/CUSTOM_TOOLS_CREATION_TUTORIAL.md` first.
     start_subprograms()
 
 
+def _is_pid_running(pid):
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        PROCESS_QUERY_INFORMATION = 0x0400
+        PROCESS_SYNCHRONIZE = 0x0010
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, False, pid)
+        if handle:
+            exit_code = ctypes.c_ulong()
+            ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return exit_code.value == 259
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
 def main():
+    args = sys.argv[1:]
+    
+    # If this is the background child, redirect stdout/stderr to log file
+    if "--background-internal" in args:
+        log_file_path = os.path.join(ROOT_DIR, "opendoor.log")
+        try:
+            log_f = open(log_file_path, "a", encoding="utf-8", buffering=1)
+            log_f.write(f"\n--- OpenDoor started in background at {datetime.now()} ---\n")
+            log_f.flush()
+            sys.stdout = log_f
+            sys.stderr = log_f
+        except Exception:
+            pass
+
+    # Check if we should run in the background
+    is_launch_cmd = False
+    for arg in args:
+        if arg.lower() in ["launch", "start", "run", "server"]:
+            is_launch_cmd = True
+            break
+
+    if is_launch_cmd and "--background-internal" not in args and "--terminal" not in [a.lower() for a in args]:
+        import socket
+        def is_port_in_use(port):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                return s.connect_ex(('127.0.0.1', port)) == 0
+
+        pid_file = os.path.join(ROOT_DIR, "opendoor.pid")
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, "r") as f:
+                    old_pid = int(f.read().strip())
+                if _is_pid_running(old_pid):
+                    print(f"OpenDoor is already running (PID: {old_pid}).")
+                    return
+            except Exception:
+                pass
+
+        if is_port_in_use(5050):
+            print("OpenDoor is already running on port 5050.")
+            return
+
+        # Launch main.py in the background
+        main_py = os.path.abspath(__file__)
+        child_args = [sys.executable, main_py] + args + ["--background-internal"]
+        log_file_path = os.path.join(ROOT_DIR, "opendoor.log")
+
+        if os.name == "nt":
+            creationflags = 0x08000000  # CREATE_NO_WINDOW
+            proc = subprocess.Popen(
+                child_args,
+                creationflags=creationflags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
+                cwd=str(ROOT_DIR)
+            )
+        else:
+            proc = subprocess.Popen(
+                child_args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
+                preexec_fn=os.setsid,
+                cwd=str(ROOT_DIR)
+            )
+
+        if proc.pid:
+            with open(pid_file, "w") as f:
+                f.write(str(proc.pid))
+            print(f"OpenDoor started in the background (PID: {proc.pid}).")
+            print(f"Logs are being written to: {log_file_path}")
+        else:
+            print("Failed to start OpenDoor in the background.")
+        return
+
     init_backend()
+    # Write PID to opendoor.pid for tracking
+    pid_file = os.path.join(ROOT_DIR, "opendoor.pid")
+    try:
+        with open(pid_file, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
     print("Multi-Agent backend running on http://127.0.0.1:5050")
     try:
         run_webhook_server()
@@ -2172,6 +2382,16 @@ def main():
         print("Shutting down backend.")
     finally:
         cleanup_subprocesses()
+        # Clean up pid file if this is the running process
+        pid_file = os.path.join(ROOT_DIR, "opendoor.pid")
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, "r") as f:
+                    current_pid_in_file = int(f.read().strip())
+                if current_pid_in_file == os.getpid():
+                    os.remove(pid_file)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

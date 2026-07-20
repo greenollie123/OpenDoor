@@ -69,13 +69,6 @@ The only files strictly required to start this are `main.py`, `mcp_server.py` an
 ├── setup-linux-macos.sh       # Automated macOS/Linux setup and PATH config
 ├── master/working/skills/     # Useful pre-made skills
 ├── tools/                     # Core system tools (Weather, Memory, Files, etc.)
-│   ├── directory.py
-│   ├── file_management.py
-│   ├── file_operations.py
-│   ├── memory.py
-│   ├── move_item.py
-│   ├── skills.py
-│   └── weather.py
 ├── terminal/                  # Terminal Client & Shortcuts
 │   ├── terminal.py            # Terminal Client Core
 └── sub-programs/
@@ -94,7 +87,6 @@ The only files strictly required to start this are `main.py`, `mcp_server.py` an
 
 - **Python 3.10 to 3.12**
 - **Node.js 18+** (for the Web UI)
-- **OpenAI API Key**
 - **Operating system**: Windows 10/11, macOS, or Linux.
 
 ### 2. Setup
@@ -138,7 +130,6 @@ Run any of the following alias commands:
 ```bash
 opendoor launch
 ```
-**The parameters `--terminal` is required on the first startup.**
 This launches the multi-agent Flask coordinator on `http://127.0.0.1:5050` and automatically boots up the subprograms (TUI, Terminal, WhatsApp, Web UI) in separate terminal/console windows depending on what is available.
 
 ### 2. Run the Terminal Client
@@ -151,9 +142,3 @@ Or execute one-off commands from your shell:
 ```bash
 opendoor ask Terry "what is the weather today?"
 ```
-
----
-
-### 🚀 In the future:
-- Voice chat
-- LiteLLM

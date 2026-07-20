@@ -9,19 +9,31 @@ import requests
 from pathlib import Path
 import yaml
 from openai import OpenAI
+import litellm
 from mcp.server.fastmcp import FastMCP
 from typing import Literal
 import importlib.util
 
 ROOT_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = os.path.join(ROOT_DIR, "config.yaml")
+MODELS_FILE = os.path.join(ROOT_DIR, "models.yaml")
 
 # Load config to get weather coordinates
 try:
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+        config = yaml.safe_load(f) or {}
 except Exception:
     config = {}
+
+# Load models config
+try:
+    if os.path.exists(MODELS_FILE):
+        with open(MODELS_FILE, "r", encoding="utf-8") as f:
+            models_config = yaml.safe_load(f) or {}
+    else:
+        models_config = {}
+except Exception:
+    models_config = {}
 
 LATITUDE = float(config.get("LATITUDE", 0.0))
 LONGITUDE = float(config.get("LONGITUDE", 0.0))
@@ -38,13 +50,35 @@ KEY_MEMORIES_FILE = os.path.join(AI_WORKSPACE_DIR, "KEY_MEMORIES.json")
 mcp = FastMCP("Core Assistant Tools")
 
 def get_embedding(text: str) -> list:
-    if not client:
-        return []
     try:
-        response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=[text]
-        )
+        # Check if an EMBEDDING_MODEL is explicitly configured in models.yaml
+        embed_info = models_config.get("EMBEDDING_MODEL")
+        if embed_info:
+            model_name = embed_info.get("model", "text-embedding-3-small")
+            api_key = embed_info.get("api_key")
+            api_base = embed_info.get("api_base")
+        else:
+            # Fallback to DEFAULT_MODEL credentials if it's an OpenAI model or if environment key exists
+            default_info = models_config.get("DEFAULT_MODEL", {})
+            model_name = "text-embedding-3-small"
+            default_model_name = default_info.get("model", "")
+            api_key = None
+            if "gpt" in default_model_name.lower() or "o1-" in default_model_name.lower() or "o3-" in default_model_name.lower():
+                api_key = default_info.get("api_key")
+            if not api_key:
+                api_key = os.environ.get("OPENAI_API_KEY")
+            api_base = default_info.get("api_base") or os.environ.get("OPENAI_API_BASE")
+
+        params = {
+            "model": model_name,
+            "input": [text]
+        }
+        if api_key:
+            params["api_key"] = api_key
+        if api_base:
+            params["api_base"] = api_base
+
+        response = litellm.embedding(**params)
         return response.data[0].embedding
     except Exception:
         return []
@@ -93,17 +127,6 @@ def ask_for_consent(title: str, description: str) -> str:
     except Exception as e:
         print(f"[-] Error requesting consent: {e}")
     return "denied"
-
-
-@mcp.tool(name="ask_for_consent")
-def ask_for_consent_tool(title: str, description: str) -> str:
-    """Ask the user for consent or approval before carrying out an action.
-    
-    Args:
-        title: The title/summary of the action requiring approval.
-        description: The detailed description or command to run.
-    """
-    return ask_for_consent(title, description)
 
 
 @mcp.tool(name="restart_mcp_server")

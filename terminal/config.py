@@ -43,8 +43,8 @@ if SCRIPT_DIR.name in ("test", "terminal"):
 else:
     PROJECT_ROOT = SCRIPT_DIR
 
-CONFIG_FILE = PROJECT_ROOT / "config.yaml"
-EXAMPLE_FILE = PROJECT_ROOT / "config.yaml.example"
+CONFIG_FILE = Path(os.path.join(PROJECT_ROOT, "config.yaml"))
+EXAMPLE_FILE = Path(os.path.join(PROJECT_ROOT, "config.yaml.example"))
 
 def get_current_version():
     version = None
@@ -156,7 +156,7 @@ def download_github_folder(repo_path, local_dir, ref=None):
         if item['type'] == 'file':
             file_name = item['name']
             file_url = item['download_url']
-            local_file_path = local_dir / file_name
+            local_file_path = Path(os.path.join(local_dir, file_name))
             
             console.print(f"  → Downloading: {repo_path}/{file_name}", style="#585b70")
             try:
@@ -170,7 +170,7 @@ def download_github_folder(repo_path, local_dir, ref=None):
         elif item['type'] == 'dir':
             subfolder_name = item['name']
             new_repo_path = f"{repo_path}/{subfolder_name}"
-            new_local_dir = local_dir / subfolder_name
+            new_local_dir = Path(os.path.join(local_dir, subfolder_name))
             
             if not download_github_folder(new_repo_path, new_local_dir, ref):
                 success = False
@@ -225,7 +225,27 @@ def update_line_config(lines, key, value):
             lines.append("# OPENAI_API_KEY: The API key for accessing OpenAI services.")
         lines.append(f"{key}: {new_value_str}")
 
-def update_config(latitude, longitude, default_model, subagent_model, disable_weather):
+def remove_key_from_config(lines, key):
+    idx_to_remove = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("#") and ":" in stripped:
+            k = stripped.split(":", 1)[0].strip()
+            if k == key:
+                idx_to_remove = i
+                break
+    if idx_to_remove is not None:
+        lines_to_del = [idx_to_remove]
+        if idx_to_remove > 0:
+            prev_line = lines[idx_to_remove - 1]
+            if f"# {key}:" in prev_line:
+                lines_to_del.append(idx_to_remove - 1)
+                if idx_to_remove > 1 and lines[idx_to_remove - 2].strip() == "":
+                    lines_to_del.append(idx_to_remove - 2)
+        for idx in sorted(lines_to_del, reverse=True):
+            lines.pop(idx)
+
+def update_config(latitude, longitude, disable_weather):
     base_file = CONFIG_FILE if CONFIG_FILE.exists() else EXAMPLE_FILE
     
     if not base_file.exists():
@@ -241,8 +261,8 @@ def update_config(latitude, longitude, default_model, subagent_model, disable_we
 
     update_line_config(lines, "LATITUDE", float(latitude))
     update_line_config(lines, "LONGITUDE", float(longitude))
-    update_line_config(lines, "DEFAULT_MODEL", default_model)
-    update_line_config(lines, "SUBAGENT_MODEL", subagent_model)
+    remove_key_from_config(lines, "DEFAULT_MODEL")
+    remove_key_from_config(lines, "SUBAGENT_MODEL")
     update_line_config(lines, "DISABLE_WEATHER", disable_weather)
 
     try:
@@ -251,20 +271,36 @@ def update_config(latitude, longitude, default_model, subagent_model, disable_we
     except Exception as e:
         console.print(f"[bold #f38ba8]✗ Error writing configuration file: {e}[/bold #f38ba8]")
 
-def ask_with_tick(question_obj, message, answer_formatter=None):
+def ask_with_tick(question_obj, message, answer_formatter=None, prompt_length=None):
+    import shutil
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
     answer = question_obj.unsafe_ask()
     ans_display = answer_formatter(answer) if answer_formatter else str(answer)
-    sys.stdout.write("\033[A\r\033[K")
+    
+    # Calculate how many lines to clear based on prompt length and answer length
+    try:
+        cols = shutil.get_terminal_size().columns
+        if not cols or cols <= 0:
+            cols = 80
+        input_len = len(str(answer))
+        total_len = (prompt_length or len(message)) + input_len + 4
+        lines_to_clear = (total_len + cols - 1) // cols
+        if lines_to_clear < 1:
+            lines_to_clear = 1
+    except Exception:
+        lines_to_clear = 1
+
+    for _ in range(lines_to_clear):
+        sys.stdout.write("\033[A\r\033[K")
     sys.stdout.flush()
     
     is_negative = False
     if isinstance(answer, bool):
         is_negative = not answer
-    elif str(answer) in ("Cancel", "Exit", "None", "cancel", "exit"):
+    elif str(answer) in ("Cancel", "Exit", "None", "cancel", "exit", "Back", "back"):
         is_negative = True
 
     if is_negative:
@@ -277,6 +313,7 @@ def edit_main_config():
     # Load existing config values for defaults
     default_main = "gpt-5.4-nano"
     default_sub = "gpt-5.4-mini"
+    default_embed = "text-embedding-3-small"
     current_lat = 0.0
     current_lon = 0.0
     current_disable_weather = False
@@ -293,67 +330,231 @@ def edit_main_config():
         except Exception:
             pass
 
-    # 1. Main Model Selection
-    MODEL_CHOICES = [
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-        "gpt-5.5-pro",
-        "gpt-5.5",
-        "gpt-5.4-pro",
-        "gpt-5.4",
-        "gpt-5.4-mini",
-        "gpt-5.4-nano",
-        "Custom (Enter manually)"
-    ]
-    
-    main_choices = MODEL_CHOICES.copy()
-    if default_main not in main_choices:
-        custom_index = main_choices.index("Custom (Enter manually)")
-        main_choices.insert(custom_index, default_main)
+    # Load existing models.yaml values if they exist
+    models_yaml_file = Path(os.path.join(PROJECT_ROOT, "models.yaml"))
+    models_cfg = {}
+    if models_yaml_file.exists():
+        try:
+            with open(models_yaml_file, "r", encoding="utf-8") as f:
+                models_cfg = yaml.safe_load(f) or {}
+                if "DEFAULT_MODEL" in models_cfg:
+                    default_main = models_cfg["DEFAULT_MODEL"].get("model", default_main)
+                if "SUBAGENT_MODEL" in models_cfg:
+                    default_sub = models_cfg["SUBAGENT_MODEL"].get("model", default_sub)
+                if "EMBEDDING_MODEL" in models_cfg:
+                    default_embed = models_cfg["EMBEDDING_MODEL"].get("model", default_embed)
+        except Exception:
+            pass
 
-    selected_main = ask_with_tick(
-        questionary.select(
-            "Select the main AI model:",
-            choices=main_choices,
-            style=tui_style
-        ),
-        "Select the main AI model:"
-    )
+    PROVIDERS = {
+        "OpenAI": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.3-codex", "gpt-5-mini", "gpt-5-nano", "gpt-5.2", "gpt-5.2-codex", "gpt-5.1", "gpt-5.1-codex", "gpt-5"],
+        "Anthropic": ["anthropic/claude-fable-5", "anthropic/claude-opus-4-8", "anthropic/claude-3-opus", "anthropic/claude-haiku-4-5"],
+        "Google Gemini": ["gemini/gemini-3.1-pro-preview", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite"],
+        "Custom (Enter manually)": []
+    }
 
-    if selected_main == "Custom (Enter manually)":
-        selected_main = ask_with_tick(
-            questionary.text(
-                "Enter the name of your custom main model:",
+    def prompt_model_details(model_type_label, existing_info, fallback_model):
+        console.print(f"\n[bold #89b4fa]--- Configure {model_type_label} Model ---[/bold #89b4fa]")
+        
+        # Determine default provider
+        default_provider = "Custom (Enter manually)"
+        existing_model = existing_info.get("model", fallback_model)
+        if existing_model:
+            existing_model_lower = existing_model.lower()
+            if existing_model.startswith("gpt-") or existing_model.startswith("o1-") or existing_model.startswith("o3-") or "openai" in existing_model_lower:
+                default_provider = "OpenAI"
+            elif "claude" in existing_model_lower or "anthropic" in existing_model_lower:
+                default_provider = "Anthropic"
+            elif "gemini" in existing_model_lower or "google" in existing_model_lower:
+                default_provider = "Google Gemini"
+            elif "groq" in existing_model_lower:
+                default_provider = "Groq"
+            elif "ollama" in existing_model_lower:
+                default_provider = "Ollama (Local)"
+
+        provider = ask_with_tick(
+            questionary.select(
+                f"Select the provider for the {model_type_label} model:",
+                choices=list(PROVIDERS.keys()),
+                #default=default_provider,
                 style=tui_style
             ),
-            "Enter the name of your custom main model:"
+            f"Select the provider for the {model_type_label} model:"
         )
+
+        selected_model = ""
+        if provider != "Custom (Enter manually)":
+            choices = PROVIDERS[provider].copy()
+            default_m = existing_model
+            # Find the best match in choices
+            if default_m not in choices:
+                for c in choices:
+                    if "/" in c and c.split("/")[-1] == default_m:
+                        default_m = c
+                        break
+            if default_m not in choices:
+                choices.append("Custom (Enter manually)")
+            else:
+                choices.append("Custom (Enter manually)")
+                
+            selected_model = ask_with_tick(
+                questionary.select(
+                    f"Select the {model_type_label} model:",
+                    choices=choices,
+                    #default=default_m if default_m in choices else choices[0],
+                    style=tui_style
+                ),
+                f"Select the {model_type_label} model:"
+            )
+
+        if provider == "Custom (Enter manually)" or selected_model == "Custom (Enter manually)":
+            selected_model = ask_with_tick(
+                questionary.text(
+                    f"Enter the model name (e.g. 'openai/gpt-5.4-mini' or 'gemini/gemini-3.5-flash'):",
+                    #default=existing_model,
+                    style=tui_style
+                ),
+                f"Enter the model name:"
+            ).strip()
+
+        # Ask for API Key
+        existing_key = existing_info.get("api_key", "")
+        if provider == "OpenAI" or "openai" in selected_model.lower():
+            default_key = existing_key or get_persistent_openai_key()
+            prompt_text = f"Enter the API Key for {selected_model} (optional, press Enter to skip/use environment):"
+            api_key = ask_with_tick(
+                questionary.password(
+                    prompt_text,
+                    default=default_key,
+                    style=tui_style
+                ),
+                f"Enter the API Key for {selected_model}:",
+                answer_formatter=lambda val: f"{val[:8]}...{val[-4:]}" if len(val) > 12 else ("*" * len(val) if val else "Not set"),
+                prompt_length=len(prompt_text)
+            ).strip()
+            
+        elif provider == "Google Gemini" or "gemini" in selected_model.lower():
+            default_key = existing_key or os.environ.get("GEMINI_API_KEY", "")
+            prompt_text = f"Enter the API Key for {selected_model} (optional, press Enter to skip/use environment):"
+            api_key = ask_with_tick(
+                questionary.password(
+                    prompt_text,
+                    default=default_key,
+                    style=tui_style
+                ),
+                f"Enter the API Key for {selected_model}:",
+                answer_formatter=lambda val: f"{val[:8]}...{val[-4:]}" if len(val) > 12 else ("*" * len(val) if val else "Not set"),
+                prompt_length=len(prompt_text)
+            ).strip()
+        else:
+            prompt_text = f"Enter the API Key for {selected_model} (optional, press Enter to skip/use environment):"
+            api_key = ask_with_tick(
+                questionary.password(
+                    prompt_text,
+                    default=existing_key,
+                    style=tui_style
+                ),
+                f"Enter the API Key for {selected_model}:",
+                answer_formatter=lambda val: f"{val[:8]}...{val[-4:]}" if len(val) > 12 else ("*" * len(val) if val else "Not set"),
+                prompt_length=len(prompt_text)
+            ).strip()
+
+        # Ask for API Base
+        default_base = existing_info.get("api_base", "")
+        if not default_base and provider == "Ollama (Local)":
+            default_base = "http://localhost:11434"
+
+        api_base = ask_with_tick(
+            questionary.text(
+                f"Enter the API Base URL (optional, press Enter to skip):",
+                default=default_base,
+                style=tui_style
+            ),
+            f"Enter the API Base URL:"
+        ).strip()
+
+        return {
+            "model": selected_model,
+            "api_key": api_key,
+            "api_base": api_base
+        }
+
+    def prompt_embedding_model_details(existing_info):
+        console.print(f"\n[bold #89b4fa]--- Configure Embedding Model ---[/bold #89b4fa]")
+
+        default_model = existing_info.get("model", default_embed)
+
+        choices = [
+            "openai/text-embedding-3-small",
+            "gemini/gemini-embedding-2",
+            "Custom (Enter manually)"
+        ]
+
+        selected_option = ask_with_tick(
+            questionary.select(
+                "Select embedding model:",
+                choices=choices,
+                style=tui_style
+            ),
+            "Select embedding model:"
+        )
+
+        selected_model = selected_option
+        if selected_option == "Custom (Enter manually)":
+            selected_model = ask_with_tick(
+                questionary.text(
+                    "Enter the embedding model name (e.g., cohere/embed-english-v3.0):",
+                    default=default_model if default_model not in choices else "",
+                    style=tui_style
+                ),
+                "Enter the embedding model name:"
+            ).strip()
+            if not selected_model:
+                selected_model = default_model
+            
+        existing_key = existing_info.get("api_key", "")
+        default_key = existing_key
+        if "text-embedding-3-small" in selected_model or "openai" in selected_model.lower():
+            default_key = default_key or get_persistent_openai_key()
+            
+        prompt_text = f"Enter the API Key for {selected_model} (optional, press Enter to skip/use environment):"
+        api_key = ask_with_tick(
+            questionary.password(
+                prompt_text,
+                default=default_key,
+                style=tui_style
+            ),
+            f"Enter the API Key for {selected_model}:",
+            answer_formatter=lambda val: f"{val[:8]}...{val[-4:]}" if len(val) > 12 else ("*" * len(val) if val else "Not set"),
+            prompt_length=len(prompt_text)
+        ).strip()
+        
+        default_base = existing_info.get("api_base", "")
+        api_base = ask_with_tick(
+            questionary.text(
+                "Enter the API Base URL (optional, press Enter to skip):",
+                default=default_base,
+                style=tui_style
+            ),
+            "Enter the API Base URL:"
+        ).strip()
+        
+        return {
+            "model": selected_model,
+            "api_key": api_key,
+            "api_base": api_base
+        }
+
+    # 1. Main Model Selection
+    default_model_info = prompt_model_details("Main", models_cfg.get("DEFAULT_MODEL", {}), default_main)
 
     # 2. Subagent Model Selection
-    sub_choices = MODEL_CHOICES.copy()
-    if default_sub not in sub_choices:
-        custom_index = sub_choices.index("Custom (Enter manually)")
-        sub_choices.insert(custom_index, default_sub)
+    subagent_model_info = prompt_model_details("Subagent", models_cfg.get("SUBAGENT_MODEL", {}), default_sub)
 
-    selected_sub = ask_with_tick(
-        questionary.select(
-            "Select the subagent AI model:",
-            choices=sub_choices,
-            style=tui_style
-        ),
-        "Select the subagent AI model:"
-    )
+    # 3. Embedding Model Selection
+    embedding_model_info = prompt_embedding_model_details(models_cfg.get("EMBEDDING_MODEL", {}))
 
-    if selected_sub == "Custom (Enter manually)":
-        selected_sub = ask_with_tick(
-            questionary.text(
-                "Enter the name of your custom subagent model:",
-                style=tui_style
-            ),
-            "Enter the name of your custom subagent model:"
-        )
-
+    console.print(f"\n[bold #89b4fa]--- Configure weather tool ---[/bold #89b4fa]")
     # 3. Weather Location Setup
     location_option = ask_with_tick(
         questionary.select(
@@ -382,7 +583,7 @@ def edit_main_config():
                     lon_val = data.get("lon")
                     city = data.get("city")
                     country = data.get("country")
-                    console.print(f"[bold #89b4fa]✓[/bold #89b4fa] [bold #cdd6f4]Detected location:[/bold #cdd6f4] [bold #89b4fa]{city}, {country}[/bold #89b4fa] ([bold #89b4fa]{lat_val}, {lon_val}[/bold #89b4fa])")
+                    console.print(f"[bold #89b4fa]✓[/bold #89b4fa] [bold #cdd6f4]Detected location:[/bold #cdd6f4] {city}, {country} ({lat_val}, {lon_val})")
                     disable_weather_val = False
                 else:
                     console.print("[bold #f38ba8]✗ Failed to parse location from response. Falling back to manual input.[/bold #f38ba8]")
@@ -424,10 +625,29 @@ def edit_main_config():
     update_config(
         latitude=lat_val,
         longitude=lon_val,
-        default_model=selected_main,
-        subagent_model=selected_sub,
         disable_weather=disable_weather_val
     )
+
+    # Save to models.yaml, preserving other keys like EMBEDDING_MODEL
+    try:
+        existing_models = {}
+        if os.path.exists(models_yaml_file):
+            try:
+                with open(models_yaml_file, "r", encoding="utf-8") as f:
+                    existing_models = yaml.safe_load(f) or {}
+            except Exception:
+                pass
+
+        existing_models["DEFAULT_MODEL"] = default_model_info
+        existing_models["SUBAGENT_MODEL"] = subagent_model_info
+        existing_models["EMBEDDING_MODEL"] = embedding_model_info
+
+        with open(models_yaml_file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(existing_models, f, default_flow_style=False)
+        console.print(f"\n[bold #a6e3a1]✓ Model details successfully saved to {models_yaml_file.name}[/bold #a6e3a1]")
+    except Exception as e:
+        console.print(f"[bold #f38ba8]✗ Failed to write models.yaml: {e}[/bold #f38ba8]")
+
     console.print(f"[bold #a6e3a1]✓ Main configuration saved successfully to {CONFIG_FILE.name}[/bold #a6e3a1]\n")
 
 def edit_whatsapp_config(config_path, example_path):
@@ -455,6 +675,7 @@ def edit_whatsapp_config(config_path, example_path):
     current_default_agent = cfg.get("DEFAULT_AGENT", "Terry")
 
     # 1. PHONE NUMBER ALLOWLIST
+    console.print(f"\n[bold #89b4fa]--- Configure WhatsApp sub-program ---[/bold #89b4fa]")
     default_allowlist_str = ", ".join(current_allowlist) if isinstance(current_allowlist, list) else str(current_allowlist)
     allowlist_input = ask_with_tick(
         questionary.text(
@@ -525,6 +746,227 @@ def edit_whatsapp_config(config_path, example_path):
     cfg["SELF_CHAT_AGENT"] = new_self_chat_agent
     cfg["DEFAULT_AGENT"] = new_default_agent
 
+    # Load STT and TTS config from models.yaml
+    models_yaml_file = Path(os.path.join(PROJECT_ROOT, "models.yaml"))
+    models_cfg = {}
+    if models_yaml_file.exists():
+        try:
+            with open(models_yaml_file, "r", encoding="utf-8") as f:
+                models_cfg = yaml.safe_load(f) or {}
+        except Exception:
+            pass
+
+    def prompt_stt_model_details(existing_info):
+        console.print(f"\n[bold #89b4fa]--- Configure STT (Speech-to-Text) Model ---[/bold #89b4fa]")
+
+        existing_model = existing_info.get("model", "faster-whisper/small.en")
+        
+        is_local = existing_model.startswith("faster-whisper/")
+        
+        engine = ask_with_tick(
+            questionary.select(
+                "Select STT Engine:",
+                choices=[
+                    "Local faster-whisper (Runs on your machine)",
+                    "LiteLLM (Cloud/External API, e.g. OpenAI, Groq)"
+                ],
+                style=tui_style
+            ),
+            "Select STT Engine:"
+        )
+
+        if "Local faster-whisper" in engine:
+            choices = [
+                "tiny.en", "tiny",
+                "base.en", "base",
+                "small.en", "small",
+                "medium.en", "medium",
+                "large-v3", "large-v3-turbo",
+                "Custom (Enter manually)"
+            ]
+            default_size = existing_model.replace("faster-whisper/", "") if is_local else "small.en"
+            
+            selected_size = ask_with_tick(
+                questionary.select(
+                    "Select local faster-whisper model size:",
+                    choices=choices,
+                    style=tui_style
+                ),
+                "Select local faster-whisper model size:"
+            )
+
+            if selected_size == "Custom (Enter manually)":
+                selected_size = ask_with_tick(
+                    questionary.text(
+                        "Enter faster-whisper model name (e.g. 'small.en'):",
+                        default=default_size if default_size not in choices else "",
+                        style=tui_style
+                    ),
+                    "Enter faster-whisper model name:"
+                ).strip()
+
+            return {
+                "model": f"faster-whisper/{selected_size}",
+                "api_key": "",
+                "api_base": ""
+            }
+        else:
+            choices = [
+                "openai/whisper-1",
+                "groq/distil-whisper-large-v3-en",
+                "groq/whisper-large-v3",
+                "Custom (Enter manually)"
+            ]
+            default_model = existing_model if not is_local else "openai/whisper-1"
+
+            selected_option = ask_with_tick(
+                questionary.select(
+                    "Select STT Model (LiteLLM):",
+                    choices=choices,
+                    style=tui_style
+                ),
+                "Select STT Model (LiteLLM):"
+            )
+
+            selected_model = selected_option
+            if selected_option == "Custom (Enter manually)":
+                selected_model = ask_with_tick(
+                    questionary.text(
+                        "Enter the STT model name (e.g. openai/whisper-1):",
+                        default=default_model if default_model not in choices else "",
+                        style=tui_style
+                    ),
+                    "Enter the STT model name:"
+                ).strip()
+
+            existing_key = existing_info.get("api_key", "")
+            existing_base = existing_info.get("api_base", "")
+
+            default_key = existing_key
+            if "openai" in selected_model.lower():
+                default_key = existing_key or get_persistent_openai_key()
+            elif "gemini" in selected_model.lower():
+                default_key = existing_key or os.environ.get("GEMINI_API_KEY", "")
+
+            prompt_text = f"Enter API Key for {selected_model} (optional, press Enter to skip):"
+            api_key = ask_with_tick(
+                questionary.password(
+                    prompt_text,
+                    default=default_key,
+                    style=tui_style
+                ),
+                f"Enter API Key for {selected_model}:",
+                answer_formatter=lambda val: f"{val[:8]}...{val[-4:]}" if len(val) > 12 else ("*" * len(val) if val else "Not set"),
+                prompt_length=len(prompt_text)
+            ).strip()
+
+            api_base = ask_with_tick(
+                questionary.text(
+                    f"Enter API Base URL for {selected_model} (optional, press Enter to skip):",
+                    default=existing_base,
+                    style=tui_style
+                ),
+                f"Enter API Base URL for {selected_model}:"
+            ).strip()
+
+            return {
+                "model": selected_model,
+                "api_key": api_key,
+                "api_base": api_base
+            }
+
+    def prompt_tts_model_details(existing_info):
+        console.print(f"\n[bold #89b4fa]--- Configure TTS (Text-to-Speech) Model ---[/bold #89b4fa]")
+
+        existing_model = existing_info.get("model", "openai/tts-1")
+        existing_voice = existing_info.get("voice", "alloy")
+
+        choices = [
+            "openai/tts-1",
+            "openai/tts-1-hd",
+            "openai/gpt-4o-mini-tts",
+            "Custom (Enter manually)"
+        ]
+
+        selected_option = ask_with_tick(
+            questionary.select(
+                "Select TTS Model (LiteLLM):",
+                choices=choices,
+                style=tui_style
+            ),
+            "Select TTS Model (LiteLLM):"
+        )
+
+        selected_model = selected_option
+        if selected_option == "Custom (Enter manually)":
+            selected_model = ask_with_tick(
+                questionary.text(
+                    "Enter the TTS model name (e.g. openai/tts-1):",
+                    default=existing_model if existing_model not in choices else "",
+                    style=tui_style
+                ),
+                "Enter the TTS model name:"
+            ).strip()
+
+        voice = ask_with_tick(
+            questionary.select(
+                "Select voice:",
+                choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+                style=tui_style
+            ),
+            "Select voice:"
+        )
+
+        existing_key = existing_info.get("api_key", "")
+        existing_base = existing_info.get("api_base", "")
+
+        default_key = existing_key
+        if "openai" in selected_model.lower():
+            default_key = existing_key or get_persistent_openai_key()
+        elif "gemini" in selected_model.lower():
+            default_key = existing_key or os.environ.get("GEMINI_API_KEY", "")
+
+        prompt_text = f"Enter API Key for {selected_model} (optional, press Enter to skip):"
+        api_key = ask_with_tick(
+            questionary.password(
+                prompt_text,
+                default=default_key,
+                style=tui_style
+            ),
+            f"Enter API Key for {selected_model}:",
+            answer_formatter=lambda val: f"{val[:8]}...{val[-4:]}" if len(val) > 12 else ("*" * len(val) if val else "Not set"),
+            prompt_length=len(prompt_text)
+        ).strip()
+
+        api_base = ask_with_tick(
+            questionary.text(
+                f"Enter API Base URL for {selected_model} (optional, press Enter to skip):",
+                default=existing_base,
+                style=tui_style
+            ),
+            f"Enter API Base URL for {selected_model}:"
+        ).strip()
+
+        return {
+            "model": selected_model,
+            "voice": voice,
+            "api_key": api_key,
+            "api_base": api_base
+        }
+
+    stt_model_info = prompt_stt_model_details(models_cfg.get("STT_MODEL", {}))
+    tts_model_info = prompt_tts_model_details(models_cfg.get("TTS_MODEL", {}))
+
+    # Save to models.yaml
+    try:
+        models_cfg["STT_MODEL"] = stt_model_info
+        models_cfg["TTS_MODEL"] = tts_model_info
+        with open(models_yaml_file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(models_cfg, f, default_flow_style=False)
+        console.print(f"\n[bold #a6e3a1]✓ STT/TTS model details successfully saved to {models_yaml_file.name}[/bold #a6e3a1]")
+    except Exception as e:
+        console.print(f"[bold #f38ba8]✗ Failed to write models.yaml: {e}[/bold #f38ba8]")
+
     try:
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
@@ -535,11 +977,12 @@ def edit_whatsapp_config(config_path, example_path):
 def build_web_ui(web_ui_dir):
     console.print(f"\n[bold #f9e2af]Building web-ui...[/bold #f9e2af]")
     try:
+        use_shell = sys.platform == "win32"
         console.print("[bold #585b70]Running npm install...[/bold #585b70]")
-        subprocess.run(["npm", "install"], cwd=web_ui_dir, shell=True, check=True)
+        subprocess.run(["npm", "install"], cwd=web_ui_dir, shell=use_shell, check=True)
         
         console.print("[bold #585b70]Running npm run build...[/bold #585b70]")
-        subprocess.run(["npm", "run", "build"], cwd=web_ui_dir, shell=True, check=True)
+        subprocess.run(["npm", "run", "build"], cwd=web_ui_dir, shell=use_shell, check=True)
         
         console.print("[bold #a6e3a1]✓ web-ui built successfully.[/bold #a6e3a1]")
     except subprocess.CalledProcessError as e:
@@ -579,7 +1022,7 @@ def get_persistent_openai_key():
     else:
         # Check ~/.bashrc, ~/.zshrc, ~/.profile
         for filename in [".zshrc", ".bashrc", ".profile"]:
-            path = Path.home() / filename
+            path = Path(os.path.join(Path.home(), filename))
             if path.exists():
                 try:
                     with open(path, "r", encoding="utf-8") as f:
@@ -634,7 +1077,7 @@ def save_openai_key(key_value):
         export_line = f'export OPENAI_API_KEY="{key_value}"'
         files_updated = []
         for filename in [".zshrc", ".bashrc", ".profile"]:
-            path = Path.home() / filename
+            path = Path(os.path.join(Path.home(), filename))
             if path.exists():
                 try:
                     with open(path, "r", encoding="utf-8") as f:
@@ -689,11 +1132,13 @@ def change_api_keys():
         console.print("\n[bold #f9e2af]! OpenAI API Key is currently unset.[/bold #f9e2af]")
     
     new_key = ask_with_tick(
-        questionary.text(
+        questionary.password(
             "Enter your OpenAI API Key:",
             style=tui_style
         ),
-        "Enter your OpenAI API Key:"
+        "Enter your OpenAI API Key:",
+        answer_formatter=lambda val: f"{val[:8]}...{val[-4:]}" if len(val) > 12 else ("*" * len(val) if val else "Not set"),
+        prompt_length=len("Enter your OpenAI API Key:")
     ).strip()
     
     if new_key:
@@ -703,10 +1148,10 @@ def change_api_keys():
 
 def connect_to_whatsapp(whatsapp_dir):
     import sqlite3
-    db_path = whatsapp_dir / "whatsapp_session.db"
-    qr_path = whatsapp_dir / "whatsapp_qr.png"
-    qr_txt_path = whatsapp_dir / "whatsapp_qr.txt"
-    log_file_path = whatsapp_dir / "whatsapp.log"
+    db_path = Path(os.path.join(whatsapp_dir, "whatsapp_session.db"))
+    qr_path = Path(os.path.join(whatsapp_dir, "whatsapp_qr.png"))
+    qr_txt_path = Path(os.path.join(whatsapp_dir, "whatsapp_qr.txt"))
+    log_file_path = Path(os.path.join(whatsapp_dir, "whatsapp.log"))
 
     #console.print("\n[bold #89b4fa]=== WhatsApp Connection Utility ===[/bold #89b4fa]\n")
     print("")
@@ -736,7 +1181,14 @@ def connect_to_whatsapp(whatsapp_dir):
             except Exception:
                 pass
 
-    # 1. Delete the current whatsapp_session.db file
+    # 1. Stop whatsapp.py if it is running
+    console.print("[bold #585b70]Stopping any running whatsapp.py processes...[/bold #585b70]")
+    force_kill_system_processes()
+
+    # Give it a short pause to ensure processes are cleaned up
+    time.sleep(1)
+
+    # 2. Delete the current whatsapp_session.db file
     if db_path.exists():
         try:
             db_path.unlink()
@@ -757,13 +1209,6 @@ def connect_to_whatsapp(whatsapp_dir):
             log_file_path.unlink()
         except Exception:
             pass
-
-    # 2. Stop whatsapp.py if it is running
-    console.print("[bold #585b70]Stopping any running whatsapp.py processes...[/bold #585b70]")
-    force_kill_system_processes()
-
-    # Give it a short pause to ensure processes are cleaned up
-    time.sleep(1)
 
     # 3. Start whatsapp.py
     console.print("[bold #585b70]Starting whatsapp.py as a background process...[/bold #585b70]")
@@ -891,14 +1336,14 @@ def main():
 
     # 1. Check sub-programs download status
     sub_programs_dirs = {
-        "whatsapp": (PROJECT_ROOT / "sub-programs" / "whatsapp", "whatsapp.py"),
-        "web-ui": (PROJECT_ROOT / "sub-programs" / "web-ui", "package.json"),
-        "TUI": (PROJECT_ROOT / "sub-programs" / "TUI", "TUI.py")
+        "whatsapp": (Path(os.path.join(PROJECT_ROOT, "sub-programs", "whatsapp")), "whatsapp.py"),
+        "web-ui": (Path(os.path.join(PROJECT_ROOT, "sub-programs", "web-ui")), "package.json"),
+        "TUI": (Path(os.path.join(PROJECT_ROOT, "sub-programs", "TUI")), "TUI.py")
     }
 
     status_map = {}
     for name, (dir_path, check_file) in sub_programs_dirs.items():
-        is_downloaded = dir_path.exists() and (dir_path / check_file).exists()
+        is_downloaded = dir_path.exists() and Path(os.path.join(dir_path, check_file)).exists()
         status_map[name] = is_downloaded
         display_name = "WhatsApp" if name == "whatsapp" else name
         if is_downloaded:
@@ -927,8 +1372,8 @@ def main():
 
     # WhatsApp config
     whatsapp_dir = sub_programs_dirs["whatsapp"][0]
-    whatsapp_config_path = whatsapp_dir / "whatsapp_config.yaml"
-    whatsapp_example_path = whatsapp_dir / "whatsapp_config.yaml.example"
+    whatsapp_config_path = Path(os.path.join(whatsapp_dir, "whatsapp_config.yaml"))
+    whatsapp_example_path = Path(os.path.join(whatsapp_dir, "whatsapp_config.yaml.example"))
     
     if status_map["whatsapp"]:
         console.print(f"[bold #585b70]Locating WhatsApp configuration files...[/bold #585b70]")
@@ -951,11 +1396,10 @@ def main():
     # Main Menu Loop
     while True:
         print("")
-        whatsapp_downloaded = whatsapp_dir.exists() and (whatsapp_dir / "whatsapp.py").exists()
+        whatsapp_downloaded = whatsapp_dir.exists() and Path(os.path.join(whatsapp_dir, "whatsapp.py")).exists()
         
         choices = [
             "Edit config",
-            "Change API Keys",
             "Install sub-programs"
         ]
         if whatsapp_downloaded:
@@ -974,17 +1418,14 @@ def main():
         if action in ("Cancel", "Exit"):
             break
 
-        elif action == "Change API Keys":
-            change_api_keys()
-
         elif action == "Connect to WhatsApp":
             connect_to_whatsapp(whatsapp_dir)
 
         elif action == "Edit config":
+            print("")
             while True:
-                print("")
                 # Recalculate whatsapp download status in case they downloaded it in this session
-                whatsapp_downloaded_now = whatsapp_dir.exists() and (whatsapp_dir / "whatsapp.py").exists()
+                whatsapp_downloaded_now = whatsapp_dir.exists() and Path(os.path.join(whatsapp_dir, "whatsapp.py")).exists()
                 
                 edit_choices = ["Main System Config (config.yaml)"]
                 if whatsapp_downloaded_now:
@@ -1024,10 +1465,10 @@ def main():
                 
             if sub_programs_to_download:
                 print("")
-                sub_program_folder = PROJECT_ROOT / "sub-programs"
+                sub_program_folder = Path(os.path.join(PROJECT_ROOT, "sub-programs"))
                 
                 # Clean up the legacy typo folder if it exists
-                legacy_folder = PROJECT_ROOT / "sub-programss"
+                legacy_folder = Path(os.path.join(PROJECT_ROOT, "sub-programss"))
                 if legacy_folder.exists():
                     try:
                         shutil.rmtree(legacy_folder)
@@ -1036,7 +1477,7 @@ def main():
                         
                 for i in sub_programs_to_download:
                     TARGET_FOLDER = f"sub-programs/{i}"
-                    dest_dir = sub_program_folder / i
+                    dest_dir = Path(os.path.join(sub_program_folder, i))
                     
                     current_ver = get_current_version()
                     if current_ver:
@@ -1060,7 +1501,7 @@ def main():
                     print("")
 
                 # If WhatsApp was downloaded, check and copy default config if needed
-                whatsapp_downloaded_now = whatsapp_dir.exists() and (whatsapp_dir / "whatsapp.py").exists()
+                whatsapp_downloaded_now = whatsapp_dir.exists() and Path(os.path.join(whatsapp_dir, "whatsapp.py")).exists()
                 if whatsapp_downloaded_now:
                     if not whatsapp_config_path.exists():
                         if whatsapp_example_path.exists():

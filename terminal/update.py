@@ -48,18 +48,34 @@ if SCRIPT_DIR.name in ("test", "terminal"):
 else:
     PROJECT_ROOT = SCRIPT_DIR
 
-BACKUP_DIR = PROJECT_ROOT / "backup"
-TEMP_DIR = PROJECT_ROOT / "temp_update"
-TEMP_ZIP = PROJECT_ROOT / "update.zip"
+BACKUP_DIR = Path(os.path.join(PROJECT_ROOT, "backup"))
+TEMP_DIR = Path(os.path.join(PROJECT_ROOT, "temp_update"))
+TEMP_ZIP = Path(os.path.join(PROJECT_ROOT, "update.zip"))
 
-def ask_with_tick(question_obj, message, answer_formatter=None):
+def ask_with_tick(question_obj, message, answer_formatter=None, prompt_length=None):
+    import shutil
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
     answer = question_obj.unsafe_ask()
     ans_display = answer_formatter(answer) if answer_formatter else str(answer)
-    sys.stdout.write("\033[A\r\033[K")
+    
+    # Calculate how many lines to clear based on prompt length and answer length
+    try:
+        cols = shutil.get_terminal_size().columns
+        if not cols or cols <= 0:
+            cols = 80
+        input_len = len(str(answer))
+        total_len = (prompt_length or len(message)) + input_len + 4
+        lines_to_clear = (total_len + cols - 1) // cols
+        if lines_to_clear < 1:
+            lines_to_clear = 1
+    except Exception:
+        lines_to_clear = 1
+
+    for _ in range(lines_to_clear):
+        sys.stdout.write("\033[A\r\033[K")
     sys.stdout.flush()
     
     is_negative = False
@@ -103,7 +119,7 @@ def create_backup():
     """Creates a backup of the root directory excluding large and transient paths."""
     timestamp = get_timestamp()
     backup_name = f"backup-{timestamp}"
-    target_backup_path = BACKUP_DIR / backup_name
+    target_backup_path = Path(os.path.join(BACKUP_DIR, backup_name))
     
     console.print(f"\n[bold #89b4fa]Step 1/5: Creating backup in backup/{backup_name}...[/bold #89b4fa]")
     
@@ -129,8 +145,8 @@ def create_backup():
             if item in excludes:
                 continue
                 
-            src_path = PROJECT_ROOT / item
-            dest_path = target_backup_path / item
+            src_path = Path(os.path.join(PROJECT_ROOT, item))
+            dest_path = Path(os.path.join(target_backup_path, item))
             
             if src_path.is_dir():
                 copy_directory_excluding(src_path, dest_path, excludes)
@@ -221,8 +237,8 @@ def extract_update():
             
         # GitHub zip archives wrap files in a single subfolder
         contents = os.listdir(TEMP_DIR)
-        if len(contents) == 1 and (TEMP_DIR / contents[0]).is_dir():
-            extracted_root = TEMP_DIR / contents[0]
+        if len(contents) == 1 and Path(os.path.join(TEMP_DIR, contents[0])).is_dir():
+            extracted_root = Path(os.path.join(TEMP_DIR, contents[0]))
             console.print("[bold #a6e3a1]✓ Extraction complete.[/bold #a6e3a1]")
             return extracted_root
         else:
@@ -234,7 +250,7 @@ def extract_update():
 
 def process_deletions(extracted_root):
     """Deletes files and directories matching lines specified in .updateconfig."""
-    update_config_path = extracted_root / ".updateconfig"
+    update_config_path = Path(os.path.join(extracted_root, ".updateconfig"))
     if not update_config_path.exists():
         return
         
@@ -258,7 +274,7 @@ def process_deletions(extracted_root):
                 if not target_rel_path or target_rel_path in (".", ".."):
                     continue
                     
-                local_target_path = PROJECT_ROOT / target_rel_path
+                local_target_path = Path(os.path.join(PROJECT_ROOT, target_rel_path))
                 if local_target_path.exists():
                     try:
                         if local_target_path.is_dir():
@@ -385,11 +401,11 @@ def update_files(extracted_root):
     console.print(f"\n[bold #89b4fa]Step 5/5: Merging and updating files...[/bold #89b4fa]")
     
     # Identify which optional subprograms currently exist locally
-    local_sub_programs_dir = PROJECT_ROOT / "sub-programs"
+    local_sub_programs_dir = Path(os.path.join(PROJECT_ROOT, "sub-programs"))
     existing_sub_programs = set()
     if local_sub_programs_dir.exists() and local_sub_programs_dir.is_dir():
         for item in os.listdir(local_sub_programs_dir):
-            if (local_sub_programs_dir / item).is_dir():
+            if Path(os.path.join(local_sub_programs_dir, item)).is_dir():
                 existing_sub_programs.add(item)
                 
     for root, dirs, files in os.walk(extracted_root):
@@ -406,7 +422,7 @@ def update_files(extracted_root):
             # Walk only the sub-programs directories that exist locally
             dirs[:] = [d for d in dirs if d in existing_sub_programs]
             
-        target_dir = PROJECT_ROOT if rel_path == '.' else PROJECT_ROOT / rel_path
+        target_dir = PROJECT_ROOT if rel_path == '.' else Path(os.path.join(PROJECT_ROOT, rel_path))
         os.makedirs(target_dir, exist_ok=True)
         
         for file in files:
@@ -414,13 +430,13 @@ def update_files(extracted_root):
             if file == ".updateconfig":
                 continue
                 
-            src_file = Path(root) / file
-            dest_file = target_dir / file
+            src_file = Path(os.path.join(root, file))
+            dest_file = Path(os.path.join(target_dir, file))
             
             # YAML template merging logic
             if file.endswith(".yaml.example"):
                 yaml_name = file[:-8]  # Strip ".example" suffix
-                dest_yaml_file = target_dir / yaml_name
+                dest_yaml_file = Path(os.path.join(target_dir, yaml_name))
                 
                 # Copy example template file
                 shutil.copy2(src_file, dest_file)
@@ -483,7 +499,7 @@ def download_github_folder(repo_path, local_dir, ref=None):
         
         if item_type == 'file':
             file_url = item.get('download_url')
-            local_file_path = local_dir / name
+            local_file_path = Path(os.path.join(local_dir, name))
             is_yaml_example = name.endswith(".yaml.example")
             
             console.print(f"    → Downloading: {repo_path}/{name}", style="#585b70")
@@ -496,7 +512,7 @@ def download_github_folder(repo_path, local_dir, ref=None):
                         f.write(file_data)
                         
                     yaml_name = name[:-8]  # Strip ".example" suffix
-                    dest_yaml_file = local_dir / yaml_name
+                    dest_yaml_file = Path(os.path.join(local_dir, yaml_name))
                     if dest_yaml_file.exists():
                         console.print(f"      → Merging config: {yaml_name}", style="#cdd6f4")
                         merge_yaml_config(local_file_path, dest_yaml_file, dest_yaml_file)
@@ -513,7 +529,7 @@ def download_github_folder(repo_path, local_dir, ref=None):
         elif item_type == 'dir':
             subfolder_name = item.get('name')
             new_repo_path = f"{repo_path}/{subfolder_name}"
-            new_local_dir = local_dir / subfolder_name
+            new_local_dir = Path(os.path.join(local_dir, subfolder_name))
             download_github_folder(new_repo_path, new_local_dir, ref)
 
 def update_subprograms(existing_sub_programs, tag_name):
@@ -526,7 +542,7 @@ def update_subprograms(existing_sub_programs, tag_name):
     for sub_name in existing_sub_programs:
         console.print(f"[bold #f9e2af]Syncing sub-program: {sub_name}...[/bold #f9e2af]")
         repo_path = f"sub-programs/{sub_name}"
-        local_dir = PROJECT_ROOT / "sub-programs" / sub_name
+        local_dir = Path(os.path.join(PROJECT_ROOT, "sub-programs", sub_name))
         
         # Download and merge files for the specific tag
         download_github_folder(repo_path, local_dir, ref=tag_name)
@@ -551,7 +567,7 @@ def cleanup():
             pass
             
     # Delete the active `.updateconfig` file in project root if it exists
-    local_updateconfig = PROJECT_ROOT / ".updateconfig"
+    local_updateconfig = Path(os.path.join(PROJECT_ROOT, ".updateconfig"))
     if local_updateconfig.exists():
         try:
             os.remove(local_updateconfig)

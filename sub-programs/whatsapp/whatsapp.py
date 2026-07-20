@@ -22,9 +22,29 @@ import sqlite3
 from neonize.client import NewClient
 from neonize.events import MessageEv
 
+# ---- CTYPES BUG PATCH FOR NEONIZE ----
+# Neonize's Bytes ctypes structure defines ptr as c_char_p, which causes self.ptr to be truncated at the first null byte.
+# Using ctypes.string_at(self.ptr, self.size) then reads from the address of the truncated bytes object, returning corrupt/garbage memory.
+# We patch get_bytes to cast the structure to one with a c_void_p to get the true memory address.
+import ctypes
+try:
+    from neonize._binder import Bytes
+    class BytesVoid(ctypes.Structure):
+        _fields_ = [("ptr", ctypes.c_void_p), ("size", ctypes.c_size_t)]
+    
+    def get_bytes_patched(self):
+        void_struct = ctypes.cast(ctypes.pointer(self), ctypes.POINTER(BytesVoid)).contents
+        return ctypes.string_at(void_struct.ptr, void_struct.size)
+    
+    Bytes.get_bytes = get_bytes_patched
+except Exception as patch_err:
+    print(f"[*] Warning: Failed to apply Neonize ctypes memory patch: {patch_err}")
+
+
 # ---- AUDIO DEPENDENCIES ----
 from faster_whisper import WhisperModel
 from openai import OpenAI
+import litellm
 
 # --------------------------------------
 # Paths
@@ -208,15 +228,68 @@ if VALID_CONFIG and config is not None:
     my_personal_jid = None
     jid_cache = {}  
     active_approvals = {}  
+    audio_chats = {}
+
 
     # -----------------------------------------------------------------
     # Audio Subsystem Initialization
     # -----------------------------------------------------------------
-    print("\n[*] Initializing Whisper STT Engine...")
-    whisper_model = WhisperModel("small.en", compute_type="int8", device="auto")
+    print("\n[*] Initializing STT Engine...")
+    stt_model_config = {}
+    models_file = os.path.join(MAIN_DIR, "models.yaml")
+    if os.path.exists(models_file):
+        try:
+            with open(models_file, "r", encoding="utf-8") as f:
+                m_cfg = yaml.safe_load(f) or {}
+                stt_model_config = m_cfg.get("STT_MODEL", {})
+        except Exception as e:
+            print(f"[*] Warning: Failed to read models.yaml in WhatsApp gateway: {e}")
+
+    stt_model_name = stt_model_config.get("model", "faster-whisper/small.en")
     
-    print("[*] Initializing OpenAI TTS Engine...")
-    openai_client = OpenAI() 
+    whisper_model = None
+    if stt_model_name.startswith("faster-whisper/"):
+        model_size = stt_model_name.replace("faster-whisper/", "")
+        print(f"[*] Initializing local faster-whisper model '{model_size}'...")
+        whisper_model = WhisperModel(model_size, compute_type="int8", device="auto")
+    else:
+        print(f"[*] Configured for LiteLLM STT using model '{stt_model_name}'...")
+    
+    print("[*] Initializing TTS Engine...")
+    tts_model_config = {}
+    models_file = os.path.join(MAIN_DIR, "models.yaml")
+    if os.path.exists(models_file):
+        try:
+            with open(models_file, "r", encoding="utf-8") as f:
+                m_cfg = yaml.safe_load(f) or {}
+                tts_model_config = m_cfg.get("TTS_MODEL", {})
+        except Exception as e:
+            print(f"[*] Warning: Failed to read models.yaml in WhatsApp gateway: {e}")
+
+    tts_model_name = tts_model_config.get("model", "openai/tts-1")
+    tts_voice = tts_model_config.get("voice", "alloy")
+    tts_api_key = tts_model_config.get("api_key")
+    tts_api_base = tts_model_config.get("api_base")
+
+    # Fallback key check
+    if not tts_api_key:
+        tts_api_key = os.environ.get("OPENAI_API_KEY")
+    if not tts_api_key and os.path.exists(models_file):
+        try:
+            with open(models_file, "r", encoding="utf-8") as f:
+                m_cfg = yaml.safe_load(f) or {}
+            for m_id in ["DEFAULT_MODEL", "SUBAGENT_MODEL", "EMBEDDING_MODEL"]:
+                m_info = m_cfg.get(m_id, {})
+                m_name = m_info.get("model", "")
+                m_k = m_info.get("api_key", "")
+                if m_k and ("gpt" in m_name.lower() or "openai" in m_name.lower() or "text-embedding" in m_name.lower()):
+                    tts_api_key = m_k
+                    break
+        except Exception:
+            pass
+
+    if not tts_api_key:
+        print("[*] Warning: No API key was found for TTS. WhatsApp TTS engine will be unavailable.") 
     
     TEMP_DIR = os.path.join(Path(__file__).resolve().parent, "temp_audio")
     os.makedirs(TEMP_DIR, exist_ok=True)
@@ -512,8 +585,23 @@ if VALID_CONFIG and config is not None:
                 with open(inbound_ogg, "wb") as f:
                     f.write(audio_bytes)
                 
-                segments, _ = whisper_model.transcribe(inbound_ogg)
-                message_text = " ".join([s.text for s in segments]).strip()
+                if whisper_model is not None:
+                    segments, _ = whisper_model.transcribe(inbound_ogg)
+                    message_text = " ".join([s.text for s in segments]).strip()
+                else:
+                    litellm_params = {}
+                    if stt_model_config.get("api_key"):
+                        litellm_params["api_key"] = stt_model_config["api_key"]
+                    if stt_model_config.get("api_base"):
+                        litellm_params["api_base"] = stt_model_config["api_base"]
+                    
+                    with open(inbound_ogg, "rb") as audio_file:
+                        response = litellm.transcription(
+                            model=stt_model_name,
+                            file=audio_file,
+                            **litellm_params
+                        )
+                    message_text = getattr(response, "text", "").strip()
             except Exception as audio_err:
                 print(f" -> [Audio Error] Failed downloading or transcribing voice note: {audio_err}")
                 return
@@ -583,6 +671,11 @@ if VALID_CONFIG and config is not None:
         
         print(f" -> [MATCH SUCCESS] Message authorized from {sender_id}! Routing via Webhook for agent '{routed_agent}'...")
         
+        if is_audio_interaction:
+            audio_chats[chat_id] = time.time()
+        else:
+            audio_chats.pop(chat_id, None)
+
         jid_cache[sender_id] = chat_target
         if sender_phone:
             jid_cache[sender_phone] = chat_target
@@ -621,48 +714,61 @@ if VALID_CONFIG and config is not None:
                         resolved_jid = my_personal_jid
 
                     if resolved_jid:
+                        audio_reply_sent = False
                         if is_audio_interaction:
-                            print(f" -> [Generating Audio Voice Note] Synthesizing speech via OpenAI TTS...")
-                            temp_mp3 = os.path.join(TEMP_DIR, "tts_temp.mp3")
-                            outbound_ogg = os.path.join(TEMP_DIR, "whatsapp_outbound.ogg")
+                            if not tts_api_key:
+                                print(" -> [Generating Audio Voice Note] Skipped: TTS API key is not initialized. Falling back to text response.")
+                            else:
+                                print(f" -> [Generating Audio Voice Note] Synthesizing speech via LiteLLM TTS using model '{tts_model_name}'...")
+                                temp_mp3 = os.path.join(TEMP_DIR, "tts_temp.mp3")
+                                outbound_ogg = os.path.join(TEMP_DIR, "whatsapp_outbound.ogg")
 
-                            # 1. Ask OpenAI's API to construct speech data
-                            with openai_client.audio.speech.with_streaming_response.create(
-                                model="gpt-4o-mini-tts",
-                                voice="alloy",
-                                input=ai_reply,
-                                response_format="mp3"
-                            ) as tts_response:
-                                tts_response.stream_to_file(temp_mp3)
+                                try:
+                                    litellm_params = {
+                                        "model": tts_model_name,
+                                        "voice": tts_voice,
+                                        "input": ai_reply,
+                                        "api_key": tts_api_key
+                                    }
+                                    if tts_api_base:
+                                        litellm_params["api_base"] = tts_api_base
+                                    
+                                    response_tts = litellm.speech(**litellm_params)
+                                    response_tts.write_to_file(temp_mp3)
 
-                            # 2. Use FFmpeg subprocess to scale audio to precise Ogg/Opus specs for WhatsApp PTT
-                            ffmpeg_cmd = [
-                                "ffmpeg", "-y", "-i", temp_mp3,
-                                "-c:a", "libopus", "-b:a", "16k", "-vbr", "on",
-                                outbound_ogg
-                            ]
-                            subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    # 2. Use FFmpeg subprocess to scale audio to precise Ogg/Opus specs for WhatsApp PTT
+                                    ffmpeg_cmd = [
+                                        "ffmpeg", "-y", "-i", temp_mp3,
+                                        "-c:a", "libopus", "-b:a", "16k", "-vbr", "on",
+                                        outbound_ogg
+                                    ]
+                                    subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                            # 3. Read raw opus file bytes
-                            with open(outbound_ogg, "rb") as audio_file:
-                                opus_bytes = audio_file.read()
+                                    # 3. Read raw opus file bytes
+                                    with open(outbound_ogg, "rb") as audio_file:
+                                        opus_bytes = audio_file.read()
 
-                            # 4. Wrap audio object and mark as a true voice note (ptt=True)
-                            audio_message = client.build_audio_message(
-                                opus_bytes,
-                                ptt=True
-                            )
-                            audio_message.audioMessage.mimetype = "audio/ogg; codecs=opus"
-                            print(f" -> [Sending Reply] Blasting voice note back to: {resolved_jid}")
-                            safe_send_message(client, resolved_jid, audio_message)
+                                    # 4. Wrap audio object and mark as a true voice note (ptt=True)
+                                    audio_message = client.build_audio_message(
+                                        opus_bytes,
+                                        ptt=True
+                                    )
+                                    audio_message.audioMessage.mimetype = "audio/ogg; codecs=opus"
+                                    print(f" -> [Sending Reply] Blasting voice note back to: {resolved_jid}")
+                                    safe_send_message(client, resolved_jid, audio_message)
+                                    audio_reply_sent = True
+                                except Exception as tts_err:
+                                    print(f" -> [TTS Error] LiteLLM TTS failed, falling back to text response: {tts_err}")
+                                finally:
+                                    # Cleanup execution footprints safely
+                                    for path_to_del in [temp_mp3, outbound_ogg]:
+                                        try:
+                                            if os.path.exists(path_to_del):
+                                                os.remove(path_to_del)
+                                        except OSError:
+                                            pass
 
-                            # Cleanup execution footprints safely
-                            try:
-                                os.remove(temp_mp3)
-                                os.remove(outbound_ogg)
-                            except OSError:
-                                pass
-                        else:
+                        if not audio_reply_sent:
                             print(f" -> [Sending Reply] Mailing text response back to: {resolved_jid}")
                             agent_ai_name = get_agent_ai_name(routed_agent)
                             prefix_template = str(config.get("REPLY_PREFIX", "\n{AI_NAME}:\n\n"))
@@ -783,8 +889,68 @@ if VALID_CONFIG and config is not None:
                         else:
                             resolved_jid = build_jid(chat_id)
                             
-                    formatted_text = text.replace("**", "*")
-                    safe_send_message(client, resolved_jid, formatted_text)
+                    # Check if this chat expects an audio response (meaning the last message received was a voice note)
+                    audio_reply_sent = False
+                    is_audio_interaction = chat_id in audio_chats
+                    
+                    if is_audio_interaction:
+                        if not tts_api_key:
+                            print(" -> [Generating Audio Voice Note (Async)] Skipped: TTS API key is not initialized. Sending text reply instead.")
+                        else:
+                            print(f" -> [Generating Audio Voice Note (Async)] Synthesizing speech via LiteLLM TTS using model '{tts_model_name}'...")
+                            temp_mp3 = os.path.join(TEMP_DIR, f"tts_temp_async_{int(time.time())}.mp3")
+                            outbound_ogg = os.path.join(TEMP_DIR, f"whatsapp_outbound_async_{int(time.time())}.ogg")
+
+                            try:
+                                litellm_params = {
+                                    "model": tts_model_name,
+                                    "voice": tts_voice,
+                                    "input": text,
+                                    "api_key": tts_api_key
+                                }
+                                if tts_api_base:
+                                    litellm_params["api_base"] = tts_api_base
+                                
+                                response_tts = litellm.speech(**litellm_params)
+                                response_tts.write_to_file(temp_mp3)
+
+                                # 2. Use FFmpeg subprocess to scale audio to precise Ogg/Opus specs for WhatsApp PTT
+                                ffmpeg_cmd = [
+                                    "ffmpeg", "-y", "-i", temp_mp3,
+                                    "-c:a", "libopus", "-b:a", "16k", "-vbr", "on",
+                                    outbound_ogg
+                                ]
+                                subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                                # 3. Read raw opus file bytes
+                                with open(outbound_ogg, "rb") as audio_file:
+                                    opus_bytes = audio_file.read()
+
+                                # 4. Wrap audio object and mark as a true voice note (ptt=True)
+                                audio_message = client.build_audio_message(
+                                    opus_bytes,
+                                    ptt=True
+                                )
+                                audio_message.audioMessage.mimetype = "audio/ogg; codecs=opus"
+                                print(f" -> [Sending Reply (Async)] Blasting voice note back to: {resolved_jid}")
+                                safe_send_message(client, resolved_jid, audio_message)
+                                audio_reply_sent = True
+                            except Exception as tts_err:
+                                print(f" -> [TTS Error (Async)] LiteLLM TTS failed, falling back to text response: {tts_err}")
+                            finally:
+                                # Cleanup execution footprints safely
+                                for path_to_del in [temp_mp3, outbound_ogg]:
+                                    try:
+                                        if os.path.exists(path_to_del):
+                                            os.remove(path_to_del)
+                                    except OSError:
+                                        pass
+
+                    if not audio_reply_sent:
+                        formatted_text = text.replace("**", "*")
+                        print(f" -> [Sending Reply (Async)] Mailing text response back to: {resolved_jid}")
+                        safe_send_message(client, resolved_jid, formatted_text)
+                        
                     return jsonify({"status": "success"})
                 except Exception as e:
                     print(f"[-] Error sending WhatsApp async message: {e}")

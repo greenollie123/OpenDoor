@@ -26,6 +26,7 @@ if not exist "%DIR%\venv" (
 REM 2. Install/Upgrade requirements
 echo.
 echo [2/3] Installing/upgrading requirements...
+"%DIR%\venv\Scripts\pip" install --only-binary :all: "litellm>=1.60.0"
 "%DIR%\venv\Scripts\pip" install -r "%DIR%\requirements.txt"
 if errorlevel 1 (
     echo WARNING: Pip installation encountered errors. Please check your internet connection or requirements.txt

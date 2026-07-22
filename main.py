@@ -124,6 +124,10 @@ def add_ui_update(update_type, channel, content, agent="Terry", **kwargs):
         upd.update(kwargs)
         ui_updates.append(upd)
 
+import builtins
+builtins.add_ui_update = add_ui_update
+builtins.request_context = request_context
+
 
 def load_session_into_updates(agent_name):
     history = load_chat_history(agent_name)
@@ -217,7 +221,7 @@ SYSTEM_FILE = os.path.join(AI_WORKSPACE_DIR, r"SYSTEM.md")
 SOUL_FILE = os.path.join(AI_WORKSPACE_DIR, r"SOUL.md")
 KEY_MEMORIES_FILE = os.path.join(AI_WORKSPACE_DIR, r"KEY_MEMORIES.json") 
 
-DEFAULT_SYSTEM_PROMPT = """# SYSTEM (SYSTEM.md)
+DEFAULT_SYSTEM_PROMPT = """# SYSTEM ({relative_file_path})
 
 ## CONTEXT VS FILES:
 - You can already see the current conversation history in your active context. If the user asks about things you said or did inside this active chat session, just answer directly from your memory. Do NOT call a tool.
@@ -228,6 +232,7 @@ DEFAULT_SYSTEM_PROMPT = """# SYSTEM (SYSTEM.md)
 2. Never claim an update was made unless you successfully executed a tool and saw the confirmation message.
 3. When patching text using 'file_patch_text', preserve structural formatting or existing layout timestamps if present.
 4. Do not use emojis.
+5. If the user talks about editing a file, make sure you know exactly where it is and locate it first before trying to edit it (use tools to find it instead of always asking the user).
 
 ## TOOLS:
 - To create tools, read `custom-tools/CUSTOM_TOOLS_CREATION_TUTORIAL.md` first.
@@ -240,29 +245,39 @@ You have a persistent core memory. You MUST actively use the `add_memory` tool t
 Do not ask permission to save a memory—just do it seamlessly in the background.
 """
 
-DEFAULT_SOUL_TEXT = """# SOUL (SOUL.md)
+DEFAULT_SOUL_TEXT = """# SOUL ({relative_file_path})
 You are {agent_name}, a highly intelligent and capable AI assistant."""
 
-def get_default_system_prompt() -> str:
+def get_default_system_prompt(file_path: str = None) -> str:
     path = os.path.join(ROOT_DIR, "SYSTEM.md.example")
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception as e:
-            print(f"Error reading SYSTEM.md.example: {e}")
-    return DEFAULT_SYSTEM_PROMPT
-
-def get_default_soul_text(agent_name: str) -> str:
-    path = os.path.join(ROOT_DIR, "SOUL.md.example")
+    content = DEFAULT_SYSTEM_PROMPT
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
-                return content.replace("{agent_name}", agent_name)
+        except Exception as e:
+            print(f"Error reading SYSTEM.md.example: {e}")
+    if file_path:
+        rel_path = os.path.relpath(file_path, AI_WORKSPACE_DIR).replace("\\", "/")
+    else:
+        rel_path = "SYSTEM.md"
+    return content.replace("{relative_file_path}", rel_path)
+
+def get_default_soul_text(agent_name: str, file_path: str = None) -> str:
+    path = os.path.join(ROOT_DIR, "SOUL.md.example")
+    content = DEFAULT_SOUL_TEXT
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
         except Exception as e:
             print(f"Error reading SOUL.md.example: {e}")
-    return DEFAULT_SOUL_TEXT.format(agent_name=agent_name)
+    if file_path:
+        rel_path = os.path.relpath(file_path, AI_WORKSPACE_DIR).replace("\\", "/")
+    else:
+        rel_path = "SOUL.md"
+    content_replaced = content.replace("{agent_name}", agent_name)
+    return content_replaced.replace("{relative_file_path}", rel_path)
 
 LOAD_TO_PROMPT_ON_MESSAGE = []
 SUBPROGRAMS_DIR = os.path.join(MAIN_DIR, r"sub-programs")
@@ -543,7 +558,7 @@ def handle_request_consent():
     channel = context.get("channel") or getattr(request_context, "channel", "External")
     chat_id = context.get("chat_id") or getattr(request_context, "chat_id", None)
     sender_id = context.get("sender_id") or getattr(request_context, "sender_id", None)
-    agent_name = context.get("agent_name") or "Terry"
+    agent_name = data.get("agent_name") or context.get("agent_name") or getattr(request_context, "agent_name", None) or "Terry"
     
     protocol = context.get("protocol") or getattr(request_context, "protocol", {})
     if not protocol:
@@ -684,12 +699,12 @@ def create_agent():
     sys_file = os.path.join(agent_working_dir, "SYSTEM.md")
     if not os.path.exists(sys_file):
         with open(sys_file, "w", encoding="utf-8") as f:
-            f.write(get_default_system_prompt())
+            f.write(get_default_system_prompt(sys_file))
             
     soul_file = os.path.join(agent_working_dir, "SOUL.md")
     if not os.path.exists(soul_file):
         with open(soul_file, "w", encoding="utf-8") as f:
-            f.write(get_default_soul_text(agent_display_name))
+            f.write(get_default_soul_text(agent_display_name, soul_file))
 
     mem_file = os.path.join(agent_working_dir, "KEY_MEMORIES.json")
     if not os.path.exists(mem_file):
@@ -892,6 +907,35 @@ def stop_server():
     
     threading.Thread(target=shutdown).start()
     return jsonify({"status": "stopping", "message": "OpenDoor backend is shutting down..."})
+
+
+@webhook_app.route('/api/restart', methods=['POST'])
+def restart_server_endpoint():
+    def restart():
+        import time
+        time.sleep(0.5)
+        cleanup_subprocesses()
+        pid_file = os.path.join(ROOT_DIR, "opendoor.pid")
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, "r") as f:
+                    current_pid_in_file = int(f.read().strip())
+                if current_pid_in_file == os.getpid():
+                    os.remove(pid_file)
+            except Exception:
+                pass
+        print("[*] OpenDoor backend restarting...")
+        main_py = os.path.abspath(__file__)
+        child_args = [sys.executable, main_py, "launch"]
+        if os.name == "nt":
+            creationflags = 0x08000000
+            subprocess.Popen(child_args, creationflags=creationflags, cwd=str(ROOT_DIR))
+        else:
+            subprocess.Popen(child_args, preexec_fn=os.setsid, cwd=str(ROOT_DIR))
+        os._exit(0)
+
+    threading.Thread(target=restart).start()
+    return jsonify({"status": "restarting", "message": "OpenDoor backend is restarting..."})
 
 
 
@@ -1407,158 +1451,6 @@ def load_system_prompt(agent_name: str, user_query: str = "") -> str:
     return ""
 
 
-def task_complete(summary_of_work: str) -> str:
-    return f"STATUS_SUCCESS: {summary_of_work}"
-
-
-def task_failed(reason_for_failure: str) -> str:
-    return f"STATUS_FAILED: {reason_for_failure}"
-
-
-def delegate_to_subagent(task_description: str, agent_name: str = "Terry", reasoning_amount: str = "low", parent_tool_call_id: str = None) -> str:
-    max_steps = 100
-    steps = 0
-    exit_tools_schemas = [
-        {
-            "type": "function",
-            "function": {
-                "name": "task_complete",
-                "description": "Call this tool when you have successfully accomplished the task.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"summary_of_work": {"type": "string"}},
-                    "required": ["summary_of_work"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "task_failed",
-                "description": "Call this tool if you encounter a critical blocker.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"reason_for_failure": {"type": "string"}},
-                    "required": ["reason_for_failure"]
-                }
-            }
-        }
-    ]
-    agent_tool_schemas = update_and_get_agent_tools(agent_name)
-    subagent_tools = agent_tool_schemas + exit_tools_schemas
-    subagent_system = {
-        "role": "system",
-        "content": "You are an autonomous sub-agent. When successful, call task_complete; otherwise task_failed."
-    }
-    messages = [subagent_system, {"role": "user", "content": f"YOUR ASSIGNED TASK:\n{task_description}"}]
-    while steps < max_steps:
-        try:
-            # Resolve credentials and model from models.yaml
-            model_info = models_config.get("SUBAGENT_MODEL", {})
-            default_model = models_config.get("DEFAULT_MODEL", {}).get("model", "gpt-5.4-nano")
-            agent_info = get_agent_info(agent_name)
-            fallback_subagent_model = agent_info.get("AI_MODEL", default_model)
-
-            model_name = model_info.get("model", fallback_subagent_model)
-            api_key = model_info.get("api_key")
-            api_base = model_info.get("api_base")
-
-            api_params = {
-                "model": model_name,
-                "messages": messages,
-                "tools": subagent_tools,
-                "tool_choice": "auto"
-            }
-            if api_key:
-                api_params["api_key"] = api_key
-            if api_base:
-                api_params["api_base"] = api_base
-
-            is_non_reasoning_model = (
-                "gpt-4" in model_name or
-                "gpt-3" in model_name or
-                "davinci" in model_name or
-                "gemini" in model_name or
-                "claude" in model_name or
-                "groq" in model_name or
-                "ollama" in model_name
-            )
-            if not is_non_reasoning_model:
-                api_params["max_completion_tokens"] = 4000
-                if reasoning_amount:
-                    api_params["reasoning_effort"] = reasoning_amount
-            else:
-                api_params["max_tokens"] = 4000
-
-            try:
-                response = litellm.completion(**api_params)
-            except Exception as api_err:
-                err_str = str(api_err).lower()
-                if "reasoning_effort" in err_str or "max_completion_tokens" in err_str or "unsupported parameter" in err_str or "extra parameters" in err_str or "unexpected keyword" in err_str:
-                    api_params.pop("reasoning_effort", None)
-                    if "max_completion_tokens" in err_str or "max_completion_tokens" not in api_params:
-                        api_params.pop("max_completion_tokens", None)
-                        api_params["max_tokens"] = 4000
-                    response = litellm.completion(**api_params)
-                else:
-                    raise api_err
-        except Exception as e:
-            return f"Subagent execution broken due to API error: {str(e)}"
-
-        msg = response.choices[0].message
-        if msg.content and parent_tool_call_id:
-            with tool_executions_lock:
-                if parent_tool_call_id in tool_executions_log:
-                    if "subagent_events" not in tool_executions_log[parent_tool_call_id]:
-                        tool_executions_log[parent_tool_call_id]["subagent_events"] = []
-                    tool_executions_log[parent_tool_call_id]["subagent_events"].append({
-                        "type": "thought",
-                        "content": msg.content
-                    })
-
-        if not msg.tool_calls:
-            messages.append({"role": "assistant", "content": msg.content or ""})
-            steps += 1
-            continue
-
-        tool_calls_list = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
-        messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": tool_calls_list})
-        for tool_call in msg.tool_calls:
-            func_name = tool_call.function.name
-            func_args = json.loads(tool_call.function.arguments)
-            
-            if parent_tool_call_id:
-                with tool_executions_lock:
-                    if parent_tool_call_id in tool_executions_log:
-                        if "subagent_events" not in tool_executions_log[parent_tool_call_id]:
-                            tool_executions_log[parent_tool_call_id]["subagent_events"] = []
-                        tool_executions_log[parent_tool_call_id]["subagent_events"].append({
-                            "type": "tool_call",
-                            "tool": func_name,
-                            "args": func_args
-                        })
-            try:
-                if func_name == "delegate_to_subagent":
-                    tool_output = "Error: Subagents are restricted from spawning recursive subagents."
-                elif func_name == "task_complete":
-                    report = func_args.get("summary_of_work", "No summary provided.")
-                    return f"Subagent completed task successfully. BACKGROUND SUMMARY (DO NOT RE-RUN):\n```\n{report}\n```"
-                elif func_name == "task_failed":
-                    reason = func_args.get("reason_for_failure", "No reason specified.")
-                    return f"Subagent reported a task failure. DIAGNOSTIC LOG (DO NOT RE-RUN):\n```\n{reason}\n```"
-                elif func_name in available_functions:
-                    if func_name == "delegate_to_subagent":
-                        func_args["agent_name"] = agent_name
-                    tool_output = available_functions[func_name](**func_args)
-                else:
-                    tool_output = call_mcp_tool(func_name, func_args, agent_name)
-            except Exception as e:
-                tool_output = f"Error executing tool {func_name}: {str(e)}"
-            messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": func_name, "content": str(tool_output)})
-        steps += 1
-    return f"Subagent execution failed: Reached maximum step limit ({max_steps}) without cleanly declaring complete or failed status."
-
-
 def _build_tools(mcp_tools=None):
     global tools, available_functions
     
@@ -1577,36 +1469,8 @@ def _build_tools(mcp_tools=None):
             }
         })
         
-    # Add local delegate_to_subagent
-    new_tools.append({
-        "type": "function",
-        "function": {
-            "name": "delegate_to_subagent",
-            "description": "Spawn an autonomous background subagent to handle multi-step workspace objectives. It runs independently with its own tools and isolated scratchpad context, reporting back with an explicit success summary or a structural diagnostic failure log.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "task_description": {
-                        "type": "string",
-                        "description": "The precise instructions, constraints, file directories, and clear definition of success for the subagent's task."
-                    },
-                    "reasoning_amount": {
-                        "type": "string",
-                        "description": "The reasoning level/effort to pass to reasoning-capable models (e.g. 'low', 'medium', 'high'). Defaults to 'low' if not specified.",
-                        "enum": ["low", "medium", "high"]
-                    }
-                },
-                "required": ["task_description"]
-            }
-        }
-    })
     tools = new_tools
-    
-    available_functions = {
-        "delegate_to_subagent": delegate_to_subagent,
-        "task_complete": task_complete,
-        "task_failed": task_failed,
-    }
+    available_functions = {}
 
 
 
@@ -1636,9 +1500,8 @@ def get_disk_tools():
 def update_and_get_agent_tools(agent_name):
     global tools
     
-    # If tools list is empty or only has the local delegate_to_subagent,
-    # attempt to rebuild/re-fetch them from the MCP server to handle slow startups.
-    if len(tools) <= 1:
+    # If tools list is empty, attempt to rebuild/re-fetch them from the MCP server.
+    if not tools:
         _build_tools()
         
     agent_files_dir = os.path.join(FILE_DIR, "agents", agent_name)
@@ -1828,6 +1691,7 @@ def encode_image_to_base64(image_path: str) -> str:
 
 def process_message(context_channel: str, clean_prompt_text: str, agent_name: str = "Terry", media_paths: list = None) -> str:
     request_context.channel = context_channel
+    request_context.agent_name = agent_name
     protocol = getattr(request_context, "protocol", {})
     if not protocol:
         protocol = DEFAULT_CHANNEL_PROTOCOLS.get(context_channel, {
@@ -1919,9 +1783,9 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
     system_prompt_message = {
         "role": "system",
         "content": (
-            f"CURRENT TIME: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"CURRENT TIME: {datetime.now().strftime('%A, %d/%m/%Y %H:%M:%S')}\n"
             f"OPERATING SYSTEM: {os_name}\n"
-            f"You are the agent: '{agent_name}'. Your configuration-specific directory is 'agents/{agent_name}'.\n"
+            f"You are the agent: '{agent_name}'. Your specific directory is 'agents/{agent_name}'.\n"
             f"Your archived sessions are saved under 'agents/{agent_name}/archived-sessions'.\n"
             f"{raw_system_content}\n\n"
             f"{channel_protocol_str}"
@@ -2004,8 +1868,15 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
                 api_payload.append(clean_m)
         try:
             agent_tool_schemas = update_and_get_agent_tools(agent_name)
+            
+            # Dynamically fetch the agent's current config to ensure instant model updates from UI/file edits
+            current_agent_info = get_agent_info(agent_name)
+            agent_model = current_agent_info.get("AI_MODEL")
+            
             model_info = models_config.get("DEFAULT_MODEL", {})
-            model_name = model_info.get("model", agent_model)
+            default_model = model_info.get("model", "gpt-5.4-nano")
+            model_name = agent_model or default_model
+            
             api_key = model_info.get("api_key")
             api_base = model_info.get("api_base")
 
@@ -2057,6 +1928,15 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
             func_name = tool_call.function.name
             func_args = json.loads(tool_call.function.arguments)
             
+            with active_tool_contexts_lock:
+                active_tool_contexts[func_name] = {
+                    "channel": context_channel,
+                    "agent_name": agent_name,
+                    "sender_id": getattr(request_context, "sender_id", None),
+                    "chat_id": getattr(request_context, "chat_id", None),
+                    "protocol": getattr(request_context, "protocol", {})
+                }
+            
             with tool_executions_lock:
                 tool_executions_log[tool_call.id] = {
                     "id": tool_call.id,
@@ -2073,9 +1953,9 @@ def process_message(context_channel: str, clean_prompt_text: str, agent_name: st
             error_str = None
             try:
                 if func_name in available_functions:
-                    if func_name == "delegate_to_subagent":
-                        func_args["agent_name"] = agent_name
-                        func_args["parent_tool_call_id"] = tool_call.id
+                    if func_name == "call_master_subagent":
+                        if not func_args.get("agent_name"):
+                            func_args["agent_name"] = agent_name
                     tool_output = available_functions[func_name](**func_args)
                 else:
                     tool_output = call_mcp_tool(func_name, func_args, agent_name)
@@ -2111,7 +1991,7 @@ def init_backend():
 
     # Automatically propagate API keys from models.yaml to environment variables so that
     # subprocesses (like whatsapp.py or mcp_server.py) and libraries can auto-detect them.
-    for model_key in ["DEFAULT_MODEL", "SUBAGENT_MODEL", "EMBEDDING_MODEL"]:
+    for model_key in ["DEFAULT_MODEL", "DEFAULT_SUBAGENT_MODEL", "SUBAGENT_MODEL", "EMBEDDING_MODEL"]:
         m_info = models_config.get(model_key, {})
         m_name = m_info.get("model", "")
         m_key = m_info.get("api_key", "")
@@ -2218,12 +2098,12 @@ To create tools, read `custom-tools/CUSTOM_TOOLS_CREATION_TUTORIAL.md` first.
         sys_file = os.path.join(agent_working_path, "SYSTEM.md")
         if not os.path.exists(sys_file):
             with open(sys_file, "w", encoding="utf-8") as f:
-                f.write(get_default_system_prompt())
+                f.write(get_default_system_prompt(sys_file))
 
         soul_file = os.path.join(agent_working_path, "SOUL.md")
         if not os.path.exists(soul_file):
             with open(soul_file, "w", encoding="utf-8") as f:
-                f.write(get_default_soul_text(agent_dir))
+                f.write(get_default_soul_text(agent_dir, soul_file))
 
         mem_file = os.path.join(agent_working_path, "KEY_MEMORIES.json")
         if not os.path.exists(mem_file):
@@ -2305,9 +2185,12 @@ def main():
 
     # Check if we should run in the background
     is_launch_cmd = False
+    is_restart_cmd = False
     for arg in args:
-        if arg.lower() in ["launch", "start", "run", "server"]:
+        if arg.lower() in ["launch", "start", "run", "server", "restart"]:
             is_launch_cmd = True
+            if arg.lower() == "restart":
+                is_restart_cmd = True
             break
 
     if is_launch_cmd and "--background-internal" not in args and "--terminal" not in [a.lower() for a in args]:
@@ -2322,8 +2205,19 @@ def main():
                 with open(pid_file, "r") as f:
                     old_pid = int(f.read().strip())
                 if _is_pid_running(old_pid):
-                    print(f"OpenDoor is already running (PID: {old_pid}).")
-                    return
+                    if is_restart_cmd:
+                        print(f"[*] Stopping existing OpenDoor instance (PID: {old_pid})...")
+                        if os.name == "nt":
+                            subprocess.run(["taskkill", "/F", "/T", "/PID", str(old_pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        else:
+                            try:
+                                os.killpg(os.getpgid(old_pid), 15)
+                            except Exception:
+                                os.kill(old_pid, 15)
+                        time.sleep(1)
+                    else:
+                        print(f"OpenDoor is already running (PID: {old_pid}).")
+                        return
             except Exception:
                 pass
 

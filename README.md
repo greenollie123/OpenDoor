@@ -125,10 +125,12 @@ In the configuration wizard, you can:
 
 Once setup is complete, you can start the coordinator server and CLI terminal client from anywhere:
 
-### 1. Start the Server
+### 1. Start, Stop, or Restart the Server
 Run any of the following alias commands:
 ```bash
-opendoor launch
+opendoor launch    # Start server in background
+opendoor stop      # Stop running server and subprograms
+opendoor restart   # Stop and restart server and subprograms
 ```
 This launches the multi-agent Flask coordinator on `http://127.0.0.1:5050` and automatically boots up the subprograms (TUI, Terminal, WhatsApp, Web UI) in separate terminal/console windows depending on what is available.
 

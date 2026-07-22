@@ -247,7 +247,11 @@ def run_interactive_session(agent_list):
         
     if not agent:
         agent = default_agent
-    if agent not in agent_list:
+
+    matched = next((a for a in agent_list if a.lower() == agent.lower()), None)
+    if matched:
+        agent = matched
+    else:
         print(f"Warning: Agent '{agent}' is not in the available agents list. Attempting to connect...")
         
     print(f"\nConnected to '{agent}'. Type 'exit' or 'quit' to end the session.")
@@ -273,6 +277,7 @@ def print_help():
     print("  opendoor launch/start/run/server        Start the server in the background")
     print("                                          (use --terminal to keep in foreground)")
     print("  opendoor stop                           Stop the background server and all subprograms")
+    print("  opendoor restart                        Restart the background server and all subprograms")
     print("  opendoor chat                           Start interactive terminal chat")
     print("  opendoor ask/tell [agent] [prompt]      Chat to the agent and print the response")
     print("  opendoor setup                          Run the initial setup wizard")
@@ -338,6 +343,34 @@ def stop_server():
     else:
         print("[-] OpenDoor is not running.")
 
+def restart_server(extra_args=None):
+    import subprocess
+    import socket
+    
+    print("[*] Restarting OpenDoor server...")
+    stop_server()
+
+    def is_port_in_use(port=5050):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('127.0.0.1', port)) == 0
+
+    print("[*] Waiting for server shutdown...")
+    for _ in range(20):
+        if not is_port_in_use(5050):
+            break
+        time.sleep(0.25)
+
+    time.sleep(0.5)
+    print("[*] Launching OpenDoor server...")
+
+    python_exe = sys.executable
+    main_py = os.path.join(MAIN_DIR, "main.py")
+    cmd = [python_exe, main_py, "launch"]
+    if extra_args:
+        cmd.extend(extra_args)
+
+    subprocess.run(cmd, cwd=str(MAIN_DIR))
+
 def main():
     arguments = sys.argv[1:]
     
@@ -353,6 +386,10 @@ def main():
 
     if action == "stop":
         stop_server()
+        return
+
+    if action == "restart":
+        restart_server(arguments[1:])
         return
 
     if action == "chat":
@@ -374,6 +411,10 @@ def main():
         else:
             agent = "Terry"
             
+        matched = next((a for a in agent_list if a.lower() == agent.lower()), None)
+        if matched:
+            agent = matched
+
         if agent in agent_list:
             if action in ["ask", "tell"]:
                 prompt = " ".join(arguments[2:])

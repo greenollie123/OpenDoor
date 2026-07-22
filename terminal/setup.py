@@ -262,7 +262,7 @@ def update_config(latitude, longitude, disable_weather):
     update_line_config(lines, "LATITUDE", float(latitude))
     update_line_config(lines, "LONGITUDE", float(longitude))
     remove_key_from_config(lines, "DEFAULT_MODEL")
-    remove_key_from_config(lines, "SUBAGENT_MODEL")
+    remove_key_from_config(lines, "DEFAULT_SUBAGENT_MODEL")
     update_line_config(lines, "DISABLE_WEATHER", disable_weather)
 
     try:
@@ -323,7 +323,7 @@ def edit_main_config():
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
                 default_main = cfg.get("DEFAULT_MODEL", default_main)
-                default_sub = cfg.get("SUBAGENT_MODEL", default_sub)
+                default_sub = cfg.get("DEFAULT_SUBAGENT_MODEL", cfg.get("SUBAGENT_MODEL", default_sub))
                 current_lat = cfg.get("LATITUDE", current_lat)
                 current_lon = cfg.get("LONGITUDE", current_lon)
                 current_disable_weather = cfg.get("DISABLE_WEATHER", current_disable_weather)
@@ -339,7 +339,9 @@ def edit_main_config():
                 models_cfg = yaml.safe_load(f) or {}
                 if "DEFAULT_MODEL" in models_cfg:
                     default_main = models_cfg["DEFAULT_MODEL"].get("model", default_main)
-                if "SUBAGENT_MODEL" in models_cfg:
+                if "DEFAULT_SUBAGENT_MODEL" in models_cfg:
+                    default_sub = models_cfg["DEFAULT_SUBAGENT_MODEL"].get("model", default_sub)
+                elif "SUBAGENT_MODEL" in models_cfg:
                     default_sub = models_cfg["SUBAGENT_MODEL"].get("model", default_sub)
                 if "EMBEDDING_MODEL" in models_cfg:
                     default_embed = models_cfg["EMBEDDING_MODEL"].get("model", default_embed)
@@ -736,11 +738,11 @@ def edit_main_config():
             "api_base": api_base
         }
 
-    # 1. Main Model Selection
-    default_model_info = prompt_model_details("Main", models_cfg.get("DEFAULT_MODEL", {}), default_main)
+    # 1. Default Main Model Selection
+    default_model_info = prompt_model_details("Default Main", models_cfg.get("DEFAULT_MODEL", {}), default_main)
 
-    # 2. Subagent Model Selection
-    subagent_model_info = prompt_model_details("Subagent", models_cfg.get("SUBAGENT_MODEL", {}), default_sub)
+    # 2. Default Subagent Model Selection
+    subagent_model_info = prompt_model_details("Default Subagent", models_cfg.get("DEFAULT_SUBAGENT_MODEL", models_cfg.get("SUBAGENT_MODEL", {})), default_sub)
 
     # 3. Embedding Model Selection
     embedding_model_info = prompt_embedding_model_details(models_cfg.get("EMBEDDING_MODEL", {}))
@@ -830,7 +832,7 @@ def edit_main_config():
                 pass
 
         existing_models["DEFAULT_MODEL"] = default_model_info
-        existing_models["SUBAGENT_MODEL"] = subagent_model_info
+        existing_models["DEFAULT_SUBAGENT_MODEL"] = subagent_model_info
         existing_models["EMBEDDING_MODEL"] = embedding_model_info
 
         with open(models_yaml_file, "w", encoding="utf-8") as f:

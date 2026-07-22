@@ -63,7 +63,11 @@ CONFIG_FILE = os.path.join(Path(__file__).resolve().parent, "whatsapp_config.yam
 WEBHOOK_URL = "http://127.0.0.1:5050/api/message"
 
 def get_agent_ai_name(agent_name: str) -> str:
-    agent_config_file = os.path.join(MAIN_DIR, "master", "working", "agents", agent_name, "config.yaml")
+    agent_config_file = os.path.join(MAIN_DIR, "master", "files", "agents", agent_name, "config.yaml")
+    if not os.path.exists(agent_config_file):
+        fallback_file = os.path.join(MAIN_DIR, "master", "working", "agents", agent_name, "config.yaml")
+        if os.path.exists(fallback_file):
+            agent_config_file = fallback_file
     if os.path.exists(agent_config_file):
         try:
             with open(agent_config_file, "r", encoding="utf-8") as f:
@@ -278,7 +282,7 @@ if VALID_CONFIG and config is not None:
         try:
             with open(models_file, "r", encoding="utf-8") as f:
                 m_cfg = yaml.safe_load(f) or {}
-            for m_id in ["DEFAULT_MODEL", "SUBAGENT_MODEL", "EMBEDDING_MODEL"]:
+            for m_id in ["DEFAULT_MODEL", "DEFAULT_SUBAGENT_MODEL", "SUBAGENT_MODEL", "EMBEDDING_MODEL"]:
                 m_info = m_cfg.get(m_id, {})
                 m_name = m_info.get("model", "")
                 m_k = m_info.get("api_key", "")
@@ -547,26 +551,60 @@ if VALID_CONFIG and config is not None:
             parts = cleaned_text.split(" ", 1)
             if len(parts) > 1:
                 new_agent = parts[1].strip()
-                if is_self_chat:
-                    config["SELF_CHAT_AGENT"] = new_agent
-                else:
-                    if "AGENT_MAPPING" not in config:
-                        config["AGENT_MAPPING"] = {}
-                    config["AGENT_MAPPING"][sender_id] = new_agent
                 
+                # Check if agent exists using the agent API (with filesystem fallback)
+                existing_agents = []
                 try:
-                    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                        yaml.safe_dump(config, f)
-                    reply_msg = f"Your WhatsApp agent has been switched to: {new_agent}"
-                except Exception as save_err:
-                    reply_msg = f"Failed to switch agent: {save_err}"
+                    api_url = WEBHOOK_URL.rsplit('/', 1)[0] + "/agents"
+                    response = requests.get(api_url, timeout=5)
+                    if response.status_code == 200:
+                        existing_agents = response.json().get("agents", [])
+                except Exception as api_err:
+                    print(f" -> [API Error] Failed to fetch agents from API: {api_err}. Falling back to directory list.")
+                
+                if not existing_agents:
+                    agents_dir = os.path.join(MAIN_DIR, "master", "working", "agents")
+                    if os.path.exists(agents_dir):
+                        existing_agents = [
+                            item for item in os.listdir(agents_dir)
+                            if os.path.isdir(os.path.join(agents_dir, item))
+                        ]
+                
+                matched_agent = None
+                for agent in existing_agents:
+                    if agent.lower() == new_agent.lower():
+                        matched_agent = agent
+                        break
                 
                 resolved_jid = jid_cache.get(sender_id) or sender_jid or chat_target
                 if not resolved_jid:
                     resolved_jid = f"{sender_id}@s.whatsapp.net"
+                
+                if not matched_agent:
+                    reply_msg = f"Agent '{new_agent}' does not exist. Available agents: {', '.join(existing_agents)}"
+                    safe_send_message(client, resolved_jid, reply_msg)
+                    print(f" -> [Command Intercepted] Failed to switch agent for {sender_id} to '{new_agent}' (not found)")
+                    return
+                
+                if is_self_chat:
+                    config["SELF_CHAT_AGENT"] = matched_agent
+                else:
+                    if "AGENT_MAPPING" not in config:
+                        config["AGENT_MAPPING"] = {}
+                    config["AGENT_MAPPING"][sender_id] = matched_agent
+                
+                try:
+                    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                        yaml.safe_dump(config, f)
+                    reply_msg = f"Your WhatsApp agent has been switched to: {matched_agent}"
+                    print(f" -> [Command Intercepted] Switched agent for {sender_id} to {matched_agent}")
+                except Exception as save_err:
+                    reply_msg = f"Failed to switch agent: {save_err}"
+                    print(f" -> [Command Intercepted] Failed to save config for {sender_id}: {save_err}")
+                
                 safe_send_message(client, resolved_jid, reply_msg)
-                print(f" -> [Command Intercepted] Switched agent for {sender_id} to {new_agent}")
                 return
+
 
         if requires_prefix and not has_prefix and not is_audio_interaction and not is_media_interaction:
             prefix_display = trigger_prefix if trigger_prefix else "no prefix"

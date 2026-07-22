@@ -4,9 +4,6 @@ setlocal enabledelayedexpansion
 set "DIR=%~dp0"
 if "%DIR:~-1%"=="\" set "DIR=%DIR:~0,-1%"
 
-echo =========================================
-echo       OpenDoor Windows Environment Setup
-echo =========================================
 echo Project directory: "%DIR%"
 
 REM 1. Create virtual environment if it doesn't exist

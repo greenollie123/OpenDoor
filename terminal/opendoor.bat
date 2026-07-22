@@ -20,8 +20,10 @@ if "%ACTION%"=="launch" goto :launch_server
 if "%ACTION%"=="start" goto :launch_server
 if "%ACTION%"=="run" goto :launch_server
 if "%ACTION%"=="server" goto :launch_server
+if "%ACTION%"=="restart" goto :run_terminal
 
 REM Run terminal client if not matching launch actions
+:run_terminal
 "%PYTHON_EXE%" "%CURRENT_DIR%\terminal.py" %*
 goto :eof
 

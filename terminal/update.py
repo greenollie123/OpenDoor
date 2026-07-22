@@ -303,6 +303,10 @@ def merge_yaml_config(template_path, user_path, output_path):
         shutil.copy2(template_path, output_path)
         return
 
+    # Backward compatibility migration for renamed config keys:
+    if "SUBAGENT_MODEL" in user_values and "DEFAULT_SUBAGENT_MODEL" not in user_values:
+        user_values["DEFAULT_SUBAGENT_MODEL"] = user_values["SUBAGENT_MODEL"]
+
     with open(template_path, 'r', encoding='utf-8') as f:
         template_lines = f.readlines()
 
@@ -548,6 +552,26 @@ def update_subprograms(existing_sub_programs, tag_name):
         download_github_folder(repo_path, local_dir, ref=tag_name)
         console.print(f"[bold #a6e3a1]✓ {sub_name} updated successfully.[/bold #a6e3a1]")
 
+def migrate_legacy_configs():
+    """Ensures backward compatibility by migrating legacy configuration keys (e.g. SUBAGENT_MODEL -> DEFAULT_SUBAGENT_MODEL)."""
+    target_files = [
+        Path(os.path.join(PROJECT_ROOT, "models.yaml")),
+        Path(os.path.join(PROJECT_ROOT, "config.yaml"))
+    ]
+    for cfg_file in target_files:
+        if not cfg_file.exists():
+            continue
+        try:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            if isinstance(data, dict) and "SUBAGENT_MODEL" in data and "DEFAULT_SUBAGENT_MODEL" not in data:
+                data["DEFAULT_SUBAGENT_MODEL"] = data["SUBAGENT_MODEL"]
+                with open(cfg_file, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(data, f, default_flow_style=False)
+                console.print(f"  → Migrated legacy 'SUBAGENT_MODEL' to 'DEFAULT_SUBAGENT_MODEL' in {cfg_file.name}", style="#a6e3a1")
+        except Exception as e:
+            console.print(f"  [bold #f9e2af]! Legacy config migration check for {cfg_file.name} skipped: {e}[/bold #f9e2af]")
+
 def cleanup():
     """Removes temporary update assets and destination config remnants."""
     console.print(f"\n[bold #89b4fa]Cleaning up temporary files...[/bold #89b4fa]")
@@ -656,6 +680,7 @@ def main():
             process_deletions(extracted_root)
             existing_sub_programs = update_files(extracted_root)
             update_subprograms(existing_sub_programs, tag_name)
+            migrate_legacy_configs()
             cleanup()
             console.print(f"\n[bold #a6e3a1]★ OpenDoor successfully updated to {tag_name}! ★[/bold #a6e3a1]")
         else:

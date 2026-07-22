@@ -1,6 +1,6 @@
 # OpenDoor
 
-OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locally on your desktop. It integrates a central **Flask API coordinator**, a **FastMCP Server** for dynamic tool execution, and multiple specialized **subprograms** for interacting with the AI via terminal, web, or WhatsApp.
+OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locally on your desktop. It integrates a central **Flask API coordinator**, a **FastMCP Server** for dynamic tool execution, a specialized **Master Sub-Agent Engine** for multi-agent task planning and execution, and multiple frontends for interacting with your AI (Terminal, Textual TUI, WhatsApp, and Web).
 
 <p align="center">
   <a href="https://github.com/greenollie/OpenDoor/commits/main/">
@@ -16,129 +16,154 @@ OpenDoor is a modular, multi-agent AI assistant ecosystem designed to run locall
 
 ## ✨ Key Features
 
-- **Multi-Agent Flask Coordinator (`main.py`)**: A centralized coordinator acting as a message/event router between custom agents and external frontends (Terminal, TUI, WhatsApp, Web).
-- **FastMCP Integration (`mcp_server.py`)**: Seamlessly implements the Model Context Protocol (MCP) to dynamically publish core system and custom tools.
-- **Hot-Reloading Tool Loader**: Automatically scans and updates active tools from the `tools/` and `master/working/custom-tools/` directories without restarting the coordinator.
-- **Interactive Consent & Approvals**: Features a secure consent flow (`ask_for_consent` tool) requiring manual user approval via API before agents run sensitive operations.
-- **Persistent Memory & Expiry**: An agent-specific persistent JSON memory structure enabling agents to store, update, retrieve, and auto-expire facts/preferences.
-- **Multiple Interface Frontends**:
-  - **Terminal TUI**: A terminal UI built with Textual for fluid agent conversations and autocompletion.
-  - **CLI Terminal Shell**: Run direct command prompts (`opendoor ask`) or interactive CLI chat sessions.
-  - **WhatsApp Bot Gateway**: Neonize-powered WhatsApp gateway to chat with agents directly on your phone.
+- **Multi-Agent Flask Coordinator (`main.py`)**: A centralized coordinator acting as a message and event router between custom agents, sub-agents, and external frontends.
+- **Master Sub-Agent Architecture (`master-sub-agent/`)**: Autonomous task decomposition engine that creates high-level roadmaps and delegates subtasks to partitioned, domain-specific sub-agents (**Coder**, **File Manager**, **Researcher**, **System Manager**, **Tester & Debugger**).
+- **FastMCP Integration (`mcp_server.py`)**: Implements the Model Context Protocol (MCP) to dynamically publish core system and custom tools.
+- **Granular Modular Tooling (`tools/`)**: Isolated, single-purpose tool modules covering file operations, Excel file manipulation, system command execution, memory management, skills, search, and user notifications.
+- **LiteLLM & Universal Model Support (`models.yaml`)**: Provider-agnostic AI model routing powered by LiteLLM. Easily configure main models, sub-agent models, embeddings, STT, and TTS across OpenAI, Claude, Gemini, Ollama, OpenRouter, and custom endpoints.
+- **Multi-Channel Registry (`channels.yaml`)**: Configurable channel handling for WhatsApp, Voice, Textual TUI, CLI Terminal, and Web UI interfaces.
+- **Interactive Consent & Security**: Secure consent flow (`ask_for_consent` tool) requiring manual user approval before running sensitive or destructive operations.
+- **Persistent Memory & Expiry**: Agent-specific persistent memory structure enabling agents to store, update, retrieve, and auto-expire facts and user preferences.
+- **Multiple Frontends**:
+  - **Terminal TUI**: A modern terminal interface built with Textual for fluid agent conversations and autocompletion.
+  - **CLI Terminal Shell**: Run direct command prompts (`opendoor ask`) or interactive CLI chat sessions (`opendoor chat`).
+  - **WhatsApp Bot Gateway**: Neonize-powered WhatsApp gateway to chat with your agents directly on your phone.
   - **React Web UI**: A Vite + React dashboard to inspect logs, customize agents, toggle tools, and manage skills.
-- **Developer-First Bootstrap**: Auto-copies example configuration templates and pauses setup, guiding you through setting up API keys, latitude/longitude, and default models.
+- **Developer-First Bootstrap**: Automated setup scripts (`setup-windows.bat`, `setup-linux-macos.sh`) and interactive CLI wizard (`opendoor setup`) to configure models, API keys, location, and sub-programs.
 
 ---
 
-## 📸 Overview of the Ecosystem
+## 📸 Ecosystem Architecture
 
-```
+```text
                            ┌────────────────────────┐
                            │       main.py          │
                            │   (Flask Webhook API)  │
                            └───────────┬────────────┘
                                        │
-       ┌───────────────┬───────────────┼───────────────┬───────────────┐
-       ▼               ▼               ▼               ▼               ▼
-┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐
-│    TUI.py    ││ terminal.py  ││ whatsapp.py  ││voice-detector││    Web UI    │
-│   (Textual)  ││              ││  (Neonize)   ││    (SOON)    ││ (Vite React) │
-└──────────────┘└──────────────┘└──────────────┘└──────────────┘└──────────────┘
+        ┌───────────────┬───────────────┼───────────────┬───────────────┐
+        ▼               ▼               ▼               ▼               ▼
+ ┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐
+ │    TUI.py    ││ terminal.py  ││ whatsapp.py  ││ voice (TTS)  ││    Web UI    │
+ │   (Textual)  ││    (CLI)     ││  (Neonize)   ││   Detector   ││ (Vite React) │
+ └──────────────┘└──────────────┘└──────────────┘└──────────────┘└──────────────┘
+                                       │
+                                       ▼
+                           ┌────────────────────────┐
+                           │   master-sub-agent/    │
+                           │ (Task Planner Engine)  │
+                           └───────────┬────────────┘
+                                       │
+         ┌───────────────┬─────────────┼─────────────┬───────────────┐
+         ▼               ▼             ▼             ▼               ▼
+   ┌───────────┐   ┌───────────┐ ┌───────────┐ ┌───────────┐   ┌───────────┐
+   │   Coder   │   │File Mngr  │ │Researcher │ │Sys Manager│   │  Tester   │
+   └───────────┘   └───────────┘ └───────────┘ └───────────┘   └───────────┘
 ```
-
-- **Core Coordinator (`main.py`)**: Launches the Flask webhooks server on `http://127.0.0.1:5050` and acts as the central router for messages and UI updates across all channels.
-- **FastMCP Server (`mcp_server.py`)**: Dynamically loads tools (from `tools/` and `master/working/custom-tools/`) and connects them via the Model Context Protocol (MCP).
-- **Textual TUI (`sub-programs/TUI/TUI.py`)**: A modern terminal interface for text chatting with auto-completion and agent selection.
-- **Terminal Client (`terminal/terminal.py`)**: An interactive chat shell and command-line utility for chatting with agents directly from the command prompt.
-- **WhatsApp Gateway (`sub-programs/whatsapp/whatsapp.py`)**: Leverages `neonize` to connect the AI as a chatbot responder to your WhatsApp number.
-- **Web UI (`sub-programs/web-ui/`)**: A sleek React dashboard built with Vite to manage agents, view chat logs, and toggle tools.
 
 ---
 
 ## 📂 Project Structure
 
-The only files strictly required to start this are `main.py`, `mcp_server.py` and `config.yaml.example`.
-
 ```text
-├── main.py                    # Coordinator and main entrypoint
-├── mcp_server.py              # MCP tool loading server
-├── config.yaml.example        # Core configuration template
+├── main.py                    # Flask coordinator and webhook router
+├── mcp_server.py              # FastMCP tool loader server
+├── config.yaml.example        # Core system configuration template
+├── models.yaml                # LiteLLM model provider configuration
+├── channels.yaml              # Multi-channel interface definitions
 ├── requirements.txt           # Python package dependencies
-├── LICENSE                    # License stuff
-├── setup-windows.bat          # Automated Windows setup and PATH config
-├── setup-linux-macos.sh       # Automated macOS/Linux setup and PATH config
-├── master/working/skills/     # Useful pre-made skills
-├── tools/                     # Core system tools (Weather, Memory, Files, etc.)
-├── terminal/                  # Terminal Client & Shortcuts
-│   ├── terminal.py            # Terminal Client Core
-└── sub-programs/
+├── setup-windows.bat          # Automated Windows setup script
+├── setup-linux-macos.sh       # Automated macOS/Linux setup script
+├── master-sub-agent/          # Master Sub-Agent orchestration engine
+├── tools/                     # Core system tools
+├── terminal/                  # CLI & Terminal Tools
+└── sub-programs/              # External interface sub-programs
     ├── TUI/                   # Textual Terminal UI
-    │   └── TUI.py
     ├── whatsapp/              # WhatsApp Neonize bridge
-    │   └── whatsapp.py
-    └── web-ui/                # Vite React dashboard
+    └── web-ui/                # Vite + React dashboard web server
 ```
 
 ---
 
-## 🛠️ Setup Instructions
+## 🤖 Master Sub-Agent Roles
+
+The Master Sub-Agent system dynamically delegates complex user prompts across five specialized roles to avoid context rot and tool overlap:
+
+| Sub-Agent Role | Primary Focus & Tool Access |
+| :--- | :--- |
+| **Coder** | Code writing, file patching, refactoring (`read_file`, `write_file`, `file_patch_text`, `file_add_line`, `create_new_file`) |
+| **File Manager** | Directory navigation, file organization (`list_directory_contents`, `create_directory`, `move_item`, `trash_item`, `send_file_to_user`) |
+| **Researcher** | Information gathering and web lookup (`web_search`, `read_skill`, `read_create_tool_tutorial`) |
+| **System Manager** | Execution environment, service lifecycle, memory updates (`run_command`, `restart_mcp_server`, `add_memory`, `remove_memory`) |
+| **Tester & Debugger** | Runtime verification, testing, log analysis (`read_file`, `run_command`) |
+
+---
+
+## 🛠️ Setup & Installation
 
 ### 1. Prerequisites
 
 - **Python 3.10 to 3.12**
-- **Node.js 18+** (for the Web UI)
-- **Operating system**: Windows 10/11, macOS, or Linux.
+- **Node.js 18+** (required for Web UI)
+- **Operating System**: Windows 10/11, macOS, or Linux
 
-### 2. Setup
+### 2. Quick Setup
 
-Run the setup script for your platform in the project root folder. This script automatically creates the Python virtual environment, installs all dependencies, configures the terminal command `opendoor` to be globally accessible, and launches the interactive configuration wizard.
+Run the setup script for your operating system from the project root folder. This script automatically sets up the Python virtual environment, installs dependencies, registers the `opendoor` CLI command globally, and launches the interactive configuration wizard.
 
-#### Windows:
-Double-click `setup-windows.bat` or run in your Command Prompt/PowerShell:
+#### Windows
+Double-click `setup-windows.bat` or run in Command Prompt / PowerShell:
 ```cmd
 setup-windows.bat
 ```
 
-#### macOS / Linux:
+#### macOS / Linux
 Run in your terminal:
 ```bash
 chmod +x setup-linux-macos.sh
 ./setup-linux-macos.sh
 ```
 
-### 3. Interactive Configuration Wizard:
-At the end of the platform setup script, the interactive wizard will launch in the same terminal window. You can also re-run it at any time using:
+### 3. Interactive Configuration Wizard
+
+At the end of setup, the interactive configuration wizard will launch. You can re-run it at any time using:
 ```bash
 opendoor setup
 ```
 
-In the configuration wizard, you can:
-- Configure default AI models and location.
-- Check download status, install, or update sub-programs (`web-ui`, `whatsapp`, `TUI`).
-- Automatically install dependencies and build the `web-ui` (`npm install` & `npm run build`) upon download.
+Through the wizard, you can:
+- Select and configure AI model providers (OpenAI, Claude, Gemini, Ollama, OpenRouter, LiteLLM).
+- Manage API keys and default parameters.
+- Install, update, or build sub-programs (`web-ui`, `whatsapp`, `TUI`).
 
-*Note: After running the initial setup, please restart your terminal to apply the PATH changes.*
+*Note: Restart your terminal after initial setup to apply global PATH updates.*
 
 ---
 
-## 🚀 Running the Assistant
+## 🚀 Running OpenDoor
 
-Once setup is complete, you can start the coordinator server and CLI terminal client from anywhere:
+Once setup is complete, control your OpenDoor server and clients using the global `opendoor` CLI:
 
-### 1. Start the Server
-Run any of the following alias commands:
+### 1. Server Control Commands
+
 ```bash
-opendoor launch
-```
-This launches the multi-agent Flask coordinator on `http://127.0.0.1:5050` and automatically boots up the subprograms (TUI, Terminal, WhatsApp, Web UI) in separate terminal/console windows depending on what is available.
-
-### 2. Run the Terminal Client
-You can chat with your agents interactively in the terminal by running:
-```bash
-opendoor chat
+opendoor launch    # Start the coordinator server & background services
+opendoor stop      # Stop all active server processes and subprograms
+opendoor restart   # Restart the coordinator server and active subprograms
+opendoor update    # Check for repository updates and upgrade dependencies
 ```
 
-Or execute one-off commands from your shell:
-```bash
-opendoor ask Terry "what is the weather today?"
-```
+Starting the server launches the Flask coordinator on `http://127.0.0.1:5050` and automatically starts configured subprograms (TUI, WhatsApp, Web UI).
+
+### 2. Interacting with Agents
+
+- **Interactive CLI Chat Session**:
+  ```bash
+  opendoor chat
+  ```
+- **Single Command Query**:
+  ```bash
+  opendoor ask "What is the status of my project tasks?"
+  opendoor ask Terry "What is the weather today?"
+  ```
+

@@ -5,9 +5,6 @@ set -e
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-echo "========================================="
-echo "      OpenDoor Unix Environment Setup"
-echo "========================================="
 echo "Project directory: $DIR"
 
 # 1. Create virtual environment if it doesn't exist
